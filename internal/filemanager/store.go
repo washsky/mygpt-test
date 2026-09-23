@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,7 +31,7 @@ type Association struct {
 type File struct {
 	ID           string      `json:"id"`
 	Name         string      `json:"name"`
-	StoredName   string      `json:"-"`
+	StoredName   string      `json:"stored_name"`
 	ContentType  string      `json:"content_type"`
 	Size         int64       `json:"size"`
 	SHA256       string      `json:"sha256"`
@@ -291,6 +290,9 @@ func safeDisplayName(name string) string {
 
 func safeExtension(name string) string {
 	ext := strings.ToLower(filepath.Ext(safeDisplayName(name)))
+	if ext == "" {
+		return ""
+	}
 	if len(ext) > 12 || strings.ContainsAny(ext, "/\\") {
 		return ""
 	}
@@ -302,7 +304,3 @@ func safeExtension(name string) string {
 	return ext
 }
 
-// DetectContentType provides a conservative MIME fallback for callers.
-func DetectContentType(sample []byte) string {
-	return mime.TypeByExtension(filepath.Ext("file"+safeExtension(string(sample))))
-}
