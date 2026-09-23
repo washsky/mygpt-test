@@ -7,11 +7,13 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/washsky/mygpt-test/internal/appdata"
 	"github.com/washsky/mygpt-test/internal/calculator"
 	"github.com/washsky/mygpt-test/internal/filemanager"
+	"github.com/washsky/mygpt-test/internal/forum"
 )
 
 type calculationRequest struct {
@@ -37,17 +39,15 @@ func Start(addr, version, dataDir string) error {
 	if err != nil {
 		return err
 	}
+	board, err := forum.Open(paths.Database, files)
+	if err != nil { return err }
+	defer board.Close()
+	token, err := board.AdminToken(paths.Config)
+	if err != nil { return err }
 	mux := http.NewServeMux()
-	filemanager.RegisterRoutes(mux, files)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+	filemanager.RegisterRoutes(mux, files, board)
+	(&forum.Handler{Store: board, Token: token}).Register(mux)
+	mux.HandleFunc("GET /calculator", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprint(w, page)
 	})
@@ -90,12 +90,13 @@ func Start(addr, version, dataDir string) error {
 	}
 
 	server := &http.Server{
-		Handler:           mux,
+		Handler:           sameOriginWrites(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("mygpt-test %s is ready", version)
 	log.Printf("data directory: %s", paths.Root)
 	log.Printf("file manager: http://%s/files", actualAddr)
+	log.Printf("forum admin token file: %s/config/admin-token", paths.Root)
 	log.Printf("Open in your browser: http://%s", actualAddr)
 	log.Printf("API endpoint: http://%s/api/calculate", actualAddr)
 	err = server.Serve(listener)
@@ -103,6 +104,21 @@ func Start(addr, version, dataDir string) error {
 		return nil
 	}
 	return err
+}
+
+func sameOriginWrites(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if origin := r.Header.Get("Origin"); origin != "" {
+				parsed, err := url.Parse(origin)
+				if err != nil || parsed.Host != r.Host || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+					http.Error(w, "cross-origin write rejected", http.StatusForbidden)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 const page = `<!doctype html>
@@ -136,7 +152,7 @@ footer{margin-top:22px;color:var(--muted);font-size:13px;text-align:center}
 </head>
 <body>
 <main class="card">
-<div style="text-align:right;margin-bottom:12px"><a href="/files">文件管理 →</a></div>
+<div style="text-align:right;margin-bottom:12px"><a href="/">论坛</a> · <a href="/files">文件管理 →</a></div>
 <div class="badge"><span class="dot"></span>本地运行 · Go Web 示例</div>
 <h1>简易计算器</h1>
 <p class="sub">输入两个数字，选择运算方式，结果由本地 Go 服务计算。</p>

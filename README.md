@@ -1,69 +1,55 @@
 # mygpt-test
 
-一个纯 Go 的本地 Web 示例，包含计算器和轻量文件管理。文件默认保存在可执行文件旁的 `mygpt-test-data` 目录中；升级二进制不会覆盖该目录。
+单文件运行的本地 Go 论坛与博客。首页可以浏览主题、发布文章、发表回复并上传附件；保留 `/files` 文件管理和 `/calculator` 计算器。升级二进制时，程序旁的 `mygpt-test-data` 数据目录继续沿用。
 
 ## 运行
 
-在仓库根目录运行：
-
-```sh
-go run ./cmd/mygpt-test -data-dir ./mygpt-test-data
-```
-
-默认监听 `127.0.0.1:8080`。打开终端打印的地址使用计算器，访问 `/files` 管理上传文件。开发时用 `-data-dir` 把数据放在项目目录；发布二进制的默认数据目录则在二进制旁边。
-
-也可以指定端口和数据目录：
+下载 GitHub Release 中适合系统的二进制文件后直接运行，默认访问 `http://127.0.0.1:8080/`。也可使用以下参数：
 
 ```sh
 ./mygpt-test -addr 127.0.0.1:9090 -data-dir ./my-data
 ```
 
-数据目录也可通过 `MYGPT_DATA_DIR` 环境变量指定，命令行 `-data-dir` 优先级更高。若要从其他设备访问，可显式设置 `-addr 0.0.0.0:8080`；文件管理目前没有用户登录，建议只在可信网络使用。
+开发环境使用 `go run ./cmd/mygpt-test -data-dir ./mygpt-test-data`。数据目录也可通过 `MYGPT_DATA_DIR` 指定，`-data-dir` 优先。默认仅监听本机；若手动设置 `-addr 0.0.0.0:8080`，访客文章、回复及文件上传接口都可以从网络访问，目前没有完整的用户账户或反滥用机制，请仅部署在可信网络中。
 
-数据目录结构：
+## 使用论坛
+
+首次启动会生成“公告”主题。文章和回复支持纯文本内容；选择附件后提交，程序先创建文章或回复，再逐个上传并关联附件。如果附件上传失败，页面会保留已发布内容并显示失败文件。管理员可创建更多主题，在首页的“设置”中更改站点名称、简介和访客发帖/回复开关。
+
+管理员令牌首次运行自动生成于 `mygpt-test-data/config/admin-token`，创建主题或保存设置时输入即可。令牌只保存在浏览器当前会话中。把“允许访客发布帖子”或“允许访客回复”关闭后，管理员仍可用令牌发布。文件上传与删除目前没有完整用户权限系统，关闭访客发帖不等于关闭上传；请保持本地监听。
+
+文件页面 `/files` 可上传、关联已有文章或回复 ID、查看列表、预览、下载和删除。单文件最大 20 MB。文本预览限制为 1 MB，支持 TXT、Markdown、LOG、JSON 格式化及 CSV 表格；PNG/JPEG/GIF/WebP 和 PDF 可以直接预览。其他类型仅下载，HTML/SVG 不会在站点来源下作为网页执行。
+
+## 数据与升级
 
 ```text
 mygpt-test-data/
 ├── files/
-│   ├── uploads/    # 上传的文件，使用随机内部文件名
-│   └── metadata/   # 文件元数据与预留的帖子/回复/用户关联
-├── database/       # 为后续 SQLite 数据库预留
-├── config/         # 配置文件预留
-└── tmp/            # 临时目录预留
+│   ├── uploads/             # 文件内容，随机内部文件名
+│   └── metadata/            # 与旧版本兼容的 JSON 文件元数据
+├── database/
+│   ├── catalog.sqlite       # 主题、文章索引、回复索引、设置及附件关系
+│   └── posts-YYYY-MM.sqlite # 按文章创建月份存储正文和回复
+├── config/
+│   └── admin-token          # 管理员令牌，首次启动自动创建
+└── tmp/
 ```
 
-## 文件管理
+回复跟随所属文章保存在同一月份分片；附件内容始终在 `files/uploads`，关系在目录数据库。保留并备份整个数据目录，包括 SQLite 的临时日志文件。不要在另一个程序进程中同时操作这些数据库；Android 构建采用 SQLite 点锁兼容模式，尤其不要用其他 SQLite 工具并发访问同一数据库。
 
-文件管理页面支持上传、列表、下载和删除；单个文件上限 20 MB。上传时可以预留关联类型和记录 ID，类型包括 `post`、`reply`、`user`。当前元数据使用本地 JSON 文件，存储接口 `filemanager.Store` 为后续 SQLite 替换预留；帖子、回复和用户 ID 目前只保存为待关联字段，等这些数据表建立后再加入外键或关联表约束。
+旧版本上传的文件和 JSON 元数据不会被删除；旧版本设置的帖子/用户占位关联不会自动变成论坛中的有效帖子关系。新的附件请从文章或回复表单上传，或在文件管理页输入真实的帖子/回复 ID。
 
-主要接口：
+## API
 
-- `GET /api/files`：列出文件及元数据
-- `POST /api/files`：multipart 上传，文件字段名为 `file`，可附带 `related_type` 和 `related_id`
-- `GET /api/files/{id}`：下载文件
-- `DELETE /api/files/{id}`：删除文件
-- `PUT /api/files/{id}/association`：更新关联，JSON 示例：`{"type":"post","id":"42"}`
+- `GET /api/forum/settings`、`PUT /api/forum/settings`：读取或修改设置
+- `GET /api/forum/topics`、`POST /api/forum/topics`：主题列表或创建主题
+- `GET /api/forum/posts?topic_id=...&limit=20&offset=0`、`POST /api/forum/posts`：文章列表或创建文章
+- `GET /api/forum/posts/{id}`、`POST /api/forum/posts/{id}/replies`：文章、回复及其附件
+- `GET /api/files`、`POST /api/files`、`GET /api/files/{id}`、`GET /api/files/{id}/preview`、`DELETE /api/files/{id}`、`PUT /api/files/{id}/association`：文件操作
+- `POST /api/calculate`：原有计算器接口；`GET /healthz`：健康检查
 
-例如：
-
-```sh
-curl -F 'file=@photo.jpg' -F 'related_type=post' -F 'related_id=42' \
-  http://127.0.0.1:8080/api/files
-```
-
-下载响应按附件处理，不会把用户上传的 HTML/SVG 当作网页执行。当前示例不包含用户认证、权限控制或 SQLite 数据库；不要把未加认证的文件管理接口直接开放到公网。
-
-## 计算 API
-
-```sh
-curl -X POST http://127.0.0.1:8080/api/calculate \
-  -H 'Content-Type: application/json' \
-  -d '{"a":12,"b":3,"op":"*"}'
-```
-
-支持 `+`、`-`、`*`、`/` 四种运算。健康检查地址为 `/healthz`，`./mygpt-test -version` 可查看程序版本。
+修改设置和创建主题需要请求头 `X-Admin-Token`。上传时使用 multipart 字段 `file`、`related_type=post|reply` 和实际记录 `related_id`；关联信息同时写入文件 JSON 和 SQLite 目录库。默认上传不关联任何内容。
 
 ## GitHub Actions
 
-- **CI** 仅手动运行，执行格式检查、测试和编译检查。
-- **Release** 仅手动运行，会读取最新的正式版本标签、递增补丁版本、创建新标签并发布 Linux、Android、Windows 和 macOS 二进制文件。
+CI 和 Release 均只在手动触发时运行。CI 在 GitHub 上解析 Go 依赖、测试和编译；Release 测试通过后将最新正式版本的补丁号加一，创建版本标签，并构建 Linux、Android、Windows、macOS 的二进制文件。SQLite 使用不依赖 CGO 的驱动；Release 的 Android 构建启用点锁支持。

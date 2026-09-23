@@ -21,9 +21,12 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: true
           cache-dependency-path: go.mod
+
+      - name: Resolve dependencies
+        run: go mod tidy
 
       - name: Test
         run: go test ./...
@@ -100,7 +103,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
           cache: true
           cache-dependency-path: go.mod
 
@@ -111,10 +114,13 @@ jobs:
           CGO_ENABLED: 0
           VERSION: ${{ needs.version.outputs.version }}
         run: |
+          go mod tidy
           mkdir -p dist
           EXT=""
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/mygpt-test-${GOOS}-${GOARCH}${EXT}" ./cmd/mygpt-test
+          TAGS=""
+          if [ "$GOOS" = "android" ]; then TAGS="sqlite3_dotlk"; fi
+          go build -tags "$TAGS" -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/mygpt-test-${GOOS}-${GOARCH}${EXT}" ./cmd/mygpt-test
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
