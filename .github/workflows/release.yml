@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.workflow }}
@@ -30,6 +30,8 @@ jobs:
 
   version:
     name: Select version
+    permissions:
+      contents: write
     needs: test
     runs-on: ubuntu-latest
     outputs:
@@ -108,6 +110,8 @@ jobs:
 
   release:
     name: Create GitHub Release
+    permissions:
+      contents: write
     needs: [test, version, build]
     if: always() && needs.test.result == 'success' && needs.version.result == 'success' && needs.build.result == 'success'
     runs-on: ubuntu-latest
