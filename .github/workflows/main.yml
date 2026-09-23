@@ -1,16 +1,10 @@
 name: CI
 
 on:
-  pull_request:
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - '.github/workflows/main.yml'
-      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
