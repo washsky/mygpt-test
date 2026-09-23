@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/washsky/mygpt-test/internal/appdata"
 	"github.com/washsky/mygpt-test/internal/calculator"
+	"github.com/washsky/mygpt-test/internal/filemanager"
 )
 
 type calculationRequest struct {
@@ -26,8 +28,17 @@ type calculationResponse struct {
 	Version   string  `json:"version"`
 }
 
-func Start(addr, version string) error {
+func Start(addr, version, dataDir string) error {
+	paths, err := appdata.Open(dataDir)
+	if err != nil {
+		return err
+	}
+	files, err := filemanager.NewStore(paths.Files)
+	if err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
+	filemanager.RegisterRoutes(mux, files)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -83,6 +94,8 @@ func Start(addr, version string) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("mygpt-test %s is ready", version)
+	log.Printf("data directory: %s", paths.Root)
+	log.Printf("file manager: http://%s/files", actualAddr)
 	log.Printf("Open in your browser: http://%s", actualAddr)
 	log.Printf("API endpoint: http://%s/api/calculate", actualAddr)
 	err = server.Serve(listener)
@@ -123,6 +136,7 @@ footer{margin-top:22px;color:var(--muted);font-size:13px;text-align:center}
 </head>
 <body>
 <main class="card">
+<div style="text-align:right;margin-bottom:12px"><a href="/files">文件管理 →</a></div>
 <div class="badge"><span class="dot"></span>本地运行 · Go Web 示例</div>
 <h1>简易计算器</h1>
 <p class="sub">输入两个数字，选择运算方式，结果由本地 Go 服务计算。</p>
