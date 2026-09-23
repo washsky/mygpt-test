@@ -7,7 +7,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/washsky/mygpt-test/internal/calculator"
