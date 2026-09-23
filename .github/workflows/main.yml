@@ -1,1 +1,58 @@
+name: Build Release
 
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Create GitHub Release
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Increase version
+        run: |
+          if [ ! -f version ]; then
+            echo "0.1.0" > version
+          fi
+          VERSION=$(cat version)
+          NEW_VERSION=$(echo "$VERSION" | awk -F. '{$NF+=1}1' OFS=.)
+          echo "$NEW_VERSION" > version
+          echo "VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Build binaries
+        run: |
+          mkdir -p build
+          GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=$VERSION" -o build/mygpt-test-linux-amd64 .
+          GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=$VERSION" -o build/mygpt-test-linux-arm64 .
+
+      - name: Commit version and tag
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add version
+          git commit -m "release v$VERSION"
+          git tag "v$VERSION"
+          git push --follow-tags
+
+      - name: Create Release
+        if: inputs.release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          files: build/*
