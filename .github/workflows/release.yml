@@ -30,10 +30,10 @@ jobs:
 
   version:
     name: Select version
-    permissions:
-      contents: write
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
@@ -47,89 +47,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          LATEST=$(git tag --list 'v*' --sort=-version:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+
-      - name: Create version tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="${GITHUB_SHA}"
-
-  build:
-    name: Build ${{ matrix.os }} ${{ matrix.arch }}
-    needs: [test, version]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: linux
-            arch: amd64
-          - os: linux
-            arch: arm64
-          - os: linux
-            arch: arm
-          - os: android
-            arch: arm64
-          - os: windows
-            arch: amd64
-          - os: darwin
-            arch: amd64
-          - os: darwin
-            arch: arm64
-
-    steps:
-      - name: Checkout tagged source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.version.outputs.tag }}
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-          cache: true
-          cache-dependency-path: go.mod
-
-      - name: Build
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 0
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          mkdir -p dist
-          EXT=""
-          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/mygpt-test-${GOOS}-${GOARCH}${EXT}" ./cmd/mygpt-test
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mygpt-test-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/*
-
-  release:
-    name: Create GitHub Release
-    permissions:
-      contents: write
-    needs: [test, version, build]
-    if: always() && needs.test.result == 'success' && needs.version.result == 'success' && needs.build.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.version.outputs.tag }}
-          name: mygpt-test ${{ needs.version.outputs.tag }}
-          generate_release_notes: true
-          files: dist/*
- | head -n 1 || true)
+          LATEST=$(git tag --list 'v*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
           if [[ -z "$LATEST" ]]; then
             MAJOR=0
             MINOR=1
@@ -142,7 +60,7 @@ jobs:
           TAG="v${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Manual run version: ${TAG}"
+          echo "Next release version: ${TAG}"
 
       - name: Create version tag
         env:
@@ -206,11 +124,11 @@ jobs:
 
   release:
     name: Create GitHub Release
-    permissions:
-      contents: write
     needs: [test, version, build]
     if: always() && needs.test.result == 'success' && needs.version.result == 'success' && needs.build.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -218,7 +136,7 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Create Release
+      - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
