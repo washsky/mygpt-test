@@ -13,6 +13,7 @@ jobs:
     name: Build static binaries
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: linux
@@ -36,25 +37,65 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: true
 
-      - name: Build
+      - name: Verify
+        run: |
+          go version
+          go mod tidy
+          go test ./...
+
+      - name: Build static binary
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 0
+        shell: bash
         run: |
           mkdir -p dist
           EXT=""
-          if [ "${GOOS}" = "windows" ]; then EXT=".exe"; fi
-          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o dist/mygpt-test-${GOOS}-${GOARCH}${EXT} .
+          if [ "${GOOS}" = "windows" ]; then
+            EXT=".exe"
+          fi
 
-      - name: Upload artifact
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o dist/mygpt-test-${GOOS}-${GOARCH}${EXT} \
+            .
+
+      - name: Generate checksum
+        shell: bash
+        run: |
+          cd dist
+          sha256sum * > checksums-${{ matrix.os }}-${{ matrix.arch }}.txt
+
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: mygpt-test-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/*
 
-      - name: Create release
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -lah release-assets
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          generate_release_notes: true
+          files: release-assets/*
