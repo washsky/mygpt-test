@@ -2,9 +2,6 @@ name: Release
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 permissions:
   contents: write
@@ -33,7 +30,6 @@ jobs:
 
   version:
     name: Select version
-    if: github.event_name == 'workflow_dispatch'
     needs: test
     runs-on: ubuntu-latest
     outputs:
@@ -59,7 +55,6 @@ jobs:
   build:
     name: Build ${{ matrix.os }} ${{ matrix.arch }}
     needs: [test, version]
-    if: always() && needs.test.result == 'success' && (needs.version.result == 'success' || needs.version.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -81,10 +76,10 @@ jobs:
             arch: arm64
 
     steps:
-      - name: Checkout
+      - name: Checkout tagged source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && needs.version.outputs.tag || github.ref }}
+          ref: ${{ needs.version.outputs.tag }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -93,23 +88,12 @@ jobs:
           cache: true
           cache-dependency-path: go.mod
 
-      - name: Set build version
-        id: build-version
-        shell: bash
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            VERSION="${{ needs.version.outputs.version }}"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Build
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 0
-          VERSION: ${{ steps.build-version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           mkdir -p dist
           EXT=""
@@ -125,7 +109,7 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [test, version, build]
-    if: always() && needs.test.result == 'success' && needs.build.result == 'success' && (needs.version.result == 'success' || needs.version.result == 'skipped')
+    if: always() && needs.test.result == 'success' && needs.version.result == 'success' && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -137,6 +121,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && needs.version.outputs.tag || github.ref_name }}
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: mygpt-test ${{ needs.version.outputs.tag }}
           generate_release_notes: true
           files: dist/*
