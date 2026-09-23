@@ -1,18 +1,17 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Release tag name (example: v0.1.0)'
-        required: true
-        default: 'v0.1.0'
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -32,9 +31,35 @@ jobs:
       - name: Test
         run: go test ./...
 
+  version:
+    name: Select version
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Calculate next version
+        id: version
+        shell: bash
+        run: |
+          VERSION="0.1.${GITHUB_RUN_NUMBER}"
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Manual run version: ${TAG}"
+
+      - name: Create version tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="${GITHUB_SHA}"
+
   build:
     name: Build ${{ matrix.os }} ${{ matrix.arch }}
-    needs: test
+    needs: [test, version]
+    if: always() && needs.test.result == 'success' && (needs.version.result == 'success' || needs.version.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -58,6 +83,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && needs.version.outputs.tag || github.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -66,18 +93,28 @@ jobs:
           cache: true
           cache-dependency-path: go.mod
 
+      - name: Set build version
+        id: build-version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            VERSION="${{ needs.version.outputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Build
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 0
+          VERSION: ${{ steps.build-version.outputs.version }}
         run: |
           mkdir -p dist
           EXT=""
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          VERSION=${GITHUB_REF_NAME}
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then VERSION=${{ inputs.tag_name }}; fi
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o dist/mygpt-test-${GOOS}-${GOARCH}${EXT} ./cmd/mygpt-test
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "dist/mygpt-test-${GOOS}-${GOARCH}${EXT}" ./cmd/mygpt-test
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -87,7 +124,8 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [test, version, build]
+    if: always() && needs.test.result == 'success' && needs.build.result == 'success' && (needs.version.result == 'success' || needs.version.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -99,6 +137,6 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && needs.version.outputs.tag || github.ref_name }}
           generate_release_notes: true
           files: dist/*
