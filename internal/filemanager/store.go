@@ -22,6 +22,8 @@ const MaxUploadSize int64 = 20 << 20
 var idPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 var ErrNotFound = errors.New("file not found")
+var ErrTooLarge = errors.New("file exceeds upload size limit")
+var ErrEmptyFile = errors.New("empty files are not allowed")
 
 type Association struct {
 	Type string `json:"type,omitempty"`
@@ -91,11 +93,11 @@ func (s *localStore) Save(name, contentType string, association Association, sou
 	}
 	if size == 0 {
 		_ = tmp.Close()
-		return File{}, errors.New("empty files are not allowed")
+		return File{}, ErrEmptyFile
 	}
 	if size > MaxUploadSize {
 		_ = tmp.Close()
-		return File{}, fmt.Errorf("file exceeds %d MB limit", MaxUploadSize>>20)
+		return File{}, ErrTooLarge
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
@@ -281,6 +283,12 @@ func newID() (string, error) {
 func safeDisplayName(name string) string {
 	name = strings.ReplaceAll(name, "\\", "/")
 	name = filepath.Base(name)
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '_'
+		}
+		return r
+	}, name)
 	name = strings.TrimSpace(name)
 	if name == "" || name == "." {
 		return "upload"
