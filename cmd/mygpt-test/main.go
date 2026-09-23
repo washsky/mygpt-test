@@ -13,7 +13,7 @@ import (
 var version = "dev"
 
 func main() {
-	addr := flag.String("addr", ":8080", "HTTP listen address")
+	addr := flag.String("addr", "127.0.0.1:8080", "HTTP listen address")
 	dataDir := flag.String("data-dir", "", "persistent data directory (default: beside the executable)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
