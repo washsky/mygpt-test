@@ -14,9 +14,9 @@
 
 ## 使用论坛
 
-首次启动会生成“公告”主题。文章和回复支持纯文本内容；选择附件后提交，程序先创建文章或回复，再逐个上传并关联附件。如果附件上传失败，页面会保留已发布内容并显示失败文件。管理员可创建更多主题，在首页的“设置”中更改站点名称、简介和访客发帖/回复开关。
+首次启动会生成“公告”主题。文章和回复支持纯文本内容；选择附件后提交，程序先创建文章或回复，再逐个上传并关联附件。如果附件上传失败，页面会保留已发布内容并显示失败文件。管理员可创建更多主题，在首页的“设置”中更改站点名称、简介和访客发帖/回复开关。管理员还可编辑或删除帖子、编辑或删除回复；删除内容会解除附件关联，文件仍保留在文件管理中。
 
-管理员令牌首次运行自动生成于 `mygpt-test-data/config/admin-token`，创建主题或保存设置时输入即可。令牌只保存在浏览器当前会话中。把“允许访客发布帖子”或“允许访客回复”关闭后，管理员仍可用令牌发布。文件上传与删除目前没有完整用户权限系统，关闭访客发帖不等于关闭上传；请保持本地监听。
+管理员令牌首次运行自动生成于 `mygpt-test-data/config/admin-token`，创建主题、修改设置或维护帖子回复时输入即可。令牌只保存在浏览器当前会话中。把“允许访客发布帖子”或“允许访客回复”关闭后，管理员仍可用令牌发布。文件上传与删除目前没有完整用户权限系统，关闭访客发帖不等于关闭上传；请保持本地监听。
 
 文件页面 `/files` 可上传、关联已有文章或回复 ID、查看列表、预览、下载和删除。单文件最大 20 MB。文本预览限制为 1 MB，支持 TXT、Markdown、LOG、JSON 格式化及 CSV 表格；PNG/JPEG/GIF/WebP 和 PDF 可以直接预览。其他类型仅下载，HTML/SVG 不会在站点来源下作为网页执行。
 
@@ -45,10 +45,12 @@ mygpt-test-data/
 - `GET /api/forum/topics`、`POST /api/forum/topics`：主题列表或创建主题
 - `GET /api/forum/posts?topic_id=...&limit=20&offset=0`、`POST /api/forum/posts`：文章列表或创建文章
 - `GET /api/forum/posts/{id}`、`POST /api/forum/posts/{id}/replies`：文章、回复及其附件
+- `PUT /api/forum/posts/{id}`、`DELETE /api/forum/posts/{id}`：管理员编辑或删除文章
+- `PUT /api/forum/replies/{id}`、`DELETE /api/forum/replies/{id}`：管理员编辑或删除回复
 - `GET /api/files`、`POST /api/files`、`GET /api/files/{id}`、`GET /api/files/{id}/preview`、`DELETE /api/files/{id}`、`PUT /api/files/{id}/association`：文件操作
 - `POST /api/calculate`：原有计算器接口；`GET /healthz`：健康检查
 
-修改设置和创建主题需要请求头 `X-Admin-Token`。上传时使用 multipart 字段 `file`、`related_type=post|reply` 和实际记录 `related_id`；关联信息同时写入文件 JSON 和 SQLite 目录库。默认上传不关联任何内容。
+修改设置、创建主题和管理文章回复需要请求头 `X-Admin-Token`。上传时使用 multipart 字段 `file`、`related_type=post|reply` 和实际记录 `related_id`；关联信息同时写入文件 JSON 和 SQLite 目录库。默认上传不关联任何内容。
 
 ## GitHub Actions
 

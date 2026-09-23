@@ -23,7 +23,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/forum/posts",h.posts)
 	mux.HandleFunc("POST /api/forum/posts",h.createPost)
 	mux.HandleFunc("GET /api/forum/posts/{id}",h.post)
+	mux.HandleFunc("PUT /api/forum/posts/{id}",h.updatePost)
+	mux.HandleFunc("DELETE /api/forum/posts/{id}",h.deletePost)
 	mux.HandleFunc("POST /api/forum/posts/{id}/replies",h.createReply)
+	mux.HandleFunc("PUT /api/forum/replies/{id}",h.updateReply)
+	mux.HandleFunc("DELETE /api/forum/replies/{id}",h.deleteReply)
 }
 
 func respond(w http.ResponseWriter,status int,value any){w.Header().Set("Content-Type","application/json; charset=utf-8");w.WriteHeader(status);_ = json.NewEncoder(w).Encode(value)}
@@ -47,5 +51,8 @@ func (h *Handler) createTopic(w http.ResponseWriter,r *http.Request){if !h.admin
 func (h *Handler) posts(w http.ResponseWriter,r *http.Request){limit,_:=strconv.Atoi(r.URL.Query().Get("limit"));offset,_:=strconv.Atoi(r.URL.Query().Get("offset"));v,err:=h.Store.Posts(r.URL.Query().Get("topic_id"),limit,offset);if err!=nil{fail(w,err);return};respond(w,200,map[string]any{"items":v})}
 func (h *Handler) createPost(w http.ResponseWriter,r *http.Request){settings,err:=h.Store.Settings();if err!=nil{fail(w,err);return};if !settings.AllowGuestPosts&&!h.admin(w,r){return};var in struct{TopicID string `json:"topic_id"`;Title string `json:"title"`;Body string `json:"body"`;Author string `json:"author"`};if !decode(w,r,&in){return};v,err:=h.Store.CreatePost(in.TopicID,in.Title,in.Body,in.Author);if errors.Is(err,ErrNotFound){fail(w,err);return};if err!=nil{http.Error(w,err.Error(),400);return};respond(w,201,v)}
 func (h *Handler) post(w http.ResponseWriter,r *http.Request){v,err:=h.Store.Post(r.PathValue("id"));if err!=nil{fail(w,err);return};respond(w,200,v)}
+func (h *Handler) updatePost(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};var in struct{Title string `json:"title"`;Body string `json:"body"`};if !decode(w,r,&in){return};if err:=h.Store.UpdatePost(r.PathValue("id"),in.Title,in.Body);err!=nil{if errors.Is(err,ErrNotFound){fail(w,err)}else{http.Error(w,err.Error(),400)};return};w.WriteHeader(http.StatusNoContent)}
+func (h *Handler) deletePost(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};if err:=h.Store.DeletePost(r.PathValue("id"));err!=nil{if errors.Is(err,ErrNotFound){fail(w,err)}else{http.Error(w,err.Error(),500)};return};w.WriteHeader(http.StatusNoContent)}
 func (h *Handler) createReply(w http.ResponseWriter,r *http.Request){settings,err:=h.Store.Settings();if err!=nil{fail(w,err);return};if !settings.AllowGuestReplies&&!h.admin(w,r){return};var in struct{Body string `json:"body"`;Author string `json:"author"`};if !decode(w,r,&in){return};v,err:=h.Store.CreateReply(r.PathValue("id"),in.Body,in.Author);if errors.Is(err,ErrNotFound){fail(w,err);return};if err!=nil{http.Error(w,err.Error(),400);return};respond(w,201,v)}
-
+func (h *Handler) updateReply(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};var in struct{Body string `json:"body"`};if !decode(w,r,&in){return};if err:=h.Store.UpdateReply(r.PathValue("id"),in.Body);err!=nil{if errors.Is(err,ErrNotFound){fail(w,err)}else{http.Error(w,err.Error(),400)};return};w.WriteHeader(http.StatusNoContent)}
+func (h *Handler) deleteReply(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};if err:=h.Store.DeleteReply(r.PathValue("id"));err!=nil{if errors.Is(err,ErrNotFound){fail(w,err)}else{http.Error(w,err.Error(),500)};return};w.WriteHeader(http.StatusNoContent)}

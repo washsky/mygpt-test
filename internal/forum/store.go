@@ -1,6 +1,7 @@
 package forum
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -203,6 +204,116 @@ func (s *Store) CreateReply(postID,body,author string) (Reply,error) {
 	if _,err=tx.Exec("UPDATE post_index SET reply_count=reply_count+1 WHERE id=?",postID);err!=nil{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},err}
 	if err=tx.Commit();err!=nil{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},err}
 	return v,nil
+}
+
+func (s *Store) UpdatePost(id, title, body string) error {
+	title = strings.TrimSpace(title)
+	body = strings.TrimSpace(body)
+	if len(title) < 1 || len(title) > 200 || len(body) < 1 || len(body) > 100000 {
+		return fmt.Errorf("标题或正文长度无效")
+	}
+	var shard string
+	if err := s.catalog.QueryRow("SELECT shard FROM post_index WHERE id=?", id).Scan(&shard); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil { return err }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.withShardTx(shard, func(tx *sql.Tx) error {
+		result, err := tx.Exec("UPDATE forum_shard.posts SET body=? WHERE id=?", body, id)
+		if err != nil { return err }
+		if count, _ := result.RowsAffected(); count == 0 { return ErrNotFound }
+		result, err = tx.Exec("UPDATE post_index SET title=? WHERE id=?", title, id)
+		if err != nil { return err }
+		if count, _ := result.RowsAffected(); count == 0 { return ErrNotFound }
+		return nil
+	})
+}
+
+func (s *Store) DeletePost(id string) error {
+	var shard string
+	if err := s.catalog.QueryRow("SELECT shard FROM post_index WHERE id=?", id).Scan(&shard); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil { return err }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fileIDs := []string{}
+	err := s.withShardTx(shard, func(tx *sql.Tx) error {
+		rows, err := tx.Query("SELECT file_id FROM file_links WHERE (entity_type='post' AND entity_id=?) OR (entity_type='reply' AND entity_id IN (SELECT id FROM reply_index WHERE post_id=?))", id, id)
+		if err != nil { return err }
+		for rows.Next() { var fileID string; if err := rows.Scan(&fileID); err != nil { rows.Close(); return err }; fileIDs = append(fileIDs, fileID) }
+		if err := rows.Err(); err != nil { rows.Close(); return err }; rows.Close()
+		if _, err := tx.Exec("DELETE FROM forum_shard.replies WHERE post_id=?", id); err != nil { return err }
+		if _, err := tx.Exec("DELETE FROM forum_shard.posts WHERE id=?", id); err != nil { return err }
+		if _, err := tx.Exec("DELETE FROM file_links WHERE (entity_type='post' AND entity_id=?) OR (entity_type='reply' AND entity_id IN (SELECT id FROM reply_index WHERE post_id=?))", id, id); err != nil { return err }
+		if _, err := tx.Exec("DELETE FROM reply_index WHERE post_id=?", id); err != nil { return err }
+		result, err := tx.Exec("DELETE FROM post_index WHERE id=?", id)
+		if err != nil { return err }
+		if count, _ := result.RowsAffected(); count == 0 { return ErrNotFound }
+		return nil
+	})
+	if err != nil { return err }
+	return s.clearFileAssociations(fileIDs)
+}
+
+func (s *Store) UpdateReply(id, body string) error {
+	body = strings.TrimSpace(body)
+	if len(body) < 1 || len(body) > 20000 { return fmt.Errorf("回复长度无效") }
+	var shard string
+	if err := s.catalog.QueryRow("SELECT shard FROM reply_index WHERE id=?", id).Scan(&shard); errors.Is(err, sql.ErrNoRows) { return ErrNotFound } else if err != nil { return err }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.withShardTx(shard, func(tx *sql.Tx) error {
+		result, err := tx.Exec("UPDATE forum_shard.replies SET body=? WHERE id=?", body, id)
+		if err != nil { return err }
+		if count, _ := result.RowsAffected(); count == 0 { return ErrNotFound }
+		return nil
+	})
+}
+
+func (s *Store) DeleteReply(id string) error {
+	var shard, postID string
+	if err := s.catalog.QueryRow("SELECT shard,post_id FROM reply_index WHERE id=?", id).Scan(&shard, &postID); errors.Is(err, sql.ErrNoRows) { return ErrNotFound } else if err != nil { return err }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fileIDs := []string{}
+	err := s.withShardTx(shard, func(tx *sql.Tx) error {
+		rows, err := tx.Query("SELECT file_id FROM file_links WHERE entity_type='reply' AND entity_id=?", id)
+		if err != nil { return err }
+		for rows.Next() { var fileID string; if err := rows.Scan(&fileID); err != nil { rows.Close(); return err }; fileIDs = append(fileIDs, fileID) }
+		if err := rows.Err(); err != nil { rows.Close(); return err }; rows.Close()
+		result, err := tx.Exec("DELETE FROM forum_shard.replies WHERE id=?", id)
+		if err != nil { return err }
+		if count, _ := result.RowsAffected(); count == 0 { return ErrNotFound }
+		if _, err := tx.Exec("DELETE FROM file_links WHERE entity_type='reply' AND entity_id=?", id); err != nil { return err }
+		if _, err := tx.Exec("DELETE FROM reply_index WHERE id=?", id); err != nil { return err }
+		if _, err := tx.Exec("UPDATE post_index SET reply_count=MAX(reply_count-1,0) WHERE id=?", postID); err != nil { return err }
+		return nil
+	})
+	if err != nil { return err }
+	return s.clearFileAssociations(fileIDs)
+}
+
+func (s *Store) withShardTx(key string, fn func(*sql.Tx) error) error {
+	conn, err := s.catalog.Conn(context.Background())
+	if err != nil { return err }
+	defer conn.Close()
+	path := filepath.Join(s.dir, "posts-"+key+".sqlite")
+	if _, err := conn.ExecContext(context.Background(), "ATTACH DATABASE ? AS forum_shard", path); err != nil { return err }
+	defer func() { _, _ = conn.ExecContext(context.Background(), "DETACH DATABASE forum_shard") }()
+	tx, err := conn.BeginTx(context.Background(), nil)
+	if err != nil { return err }
+	defer tx.Rollback()
+	if err := fn(tx); err != nil { return err }
+	return tx.Commit()
+}
+
+func (s *Store) clearFileAssociations(ids []string) error {
+	for _, id := range ids {
+		if _, err := s.files.SetAssociation(id, filemanager.Association{}); err != nil && !errors.Is(err, filemanager.ErrNotFound) {
+			return fmt.Errorf("content removed but file %s could not be unlinked: %w", id, err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) attachments(kind,id string) ([]filemanager.File,error) {
