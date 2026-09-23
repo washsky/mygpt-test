@@ -1,12 +1,12 @@
 package filemanager
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
-	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -19,8 +19,7 @@ type apiHandler struct {
 	store Store
 }
 
-func NewHandler(store Store) http.Handler {
-	mux := http.NewServeMux()
+func RegisterRoutes(mux *http.ServeMux, store Store) {
 	handler := &apiHandler{store: store}
 	mux.HandleFunc("GET /api/files", handler.list)
 	mux.HandleFunc("POST /api/files", handler.upload)
@@ -28,7 +27,6 @@ func NewHandler(store Store) http.Handler {
 	mux.HandleFunc("DELETE /api/files/{id}", handler.delete)
 	mux.HandleFunc("PUT /api/files/{id}/association", handler.associate)
 	mux.HandleFunc("GET /files", handler.page)
-	return mux
 }
 
 func (h *apiHandler) list(w http.ResponseWriter, r *http.Request) {
@@ -64,19 +62,20 @@ func (h *apiHandler) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid file name", http.StatusBadRequest)
 		return
 	}
-	contentType := header.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = mime.TypeByExtension(filepath.Ext(name))
+	prefix := make([]byte, 512)
+	n, readErr := io.ReadFull(file, prefix)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		http.Error(w, "could not read upload", http.StatusBadRequest)
+		return
 	}
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
+	prefix = prefix[:n]
+	contentType := http.DetectContentType(prefix)
 	association, err := parseAssociation(r.FormValue("related_type"), r.FormValue("related_id"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	record, err := h.store.Save(name, contentType, association, file)
+	record, err := h.store.Save(name, contentType, association, io.MultiReader(bytes.NewReader(prefix), file))
 	if err != nil {
 		if strings.Contains(err.Error(), "exceeds") {
 			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
@@ -171,6 +170,3 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-type uploadForm interface {
-	FormFile(string) (multipart.File, *multipart.FileHeader, error)
-}
