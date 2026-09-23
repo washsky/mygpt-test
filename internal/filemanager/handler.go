@@ -77,8 +77,12 @@ func (h *apiHandler) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	record, err := h.store.Save(name, contentType, association, io.MultiReader(bytes.NewReader(prefix), file))
 	if err != nil {
-		if strings.Contains(err.Error(), "exceeds") {
-			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+		if errors.Is(err, ErrTooLarge) {
+			http.Error(w, "file exceeds 20 MB limit", http.StatusRequestEntityTooLarge)
+			return
+		}
+		if errors.Is(err, ErrEmptyFile) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		http.Error(w, "could not store uploaded file: "+err.Error(), http.StatusInternalServerError)
