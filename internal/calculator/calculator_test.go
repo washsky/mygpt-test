@@ -21,7 +21,7 @@ func TestEvaluate(t *testing.T) {
 		{"cos(0) + tan(0)", 1},
 		{"ln(e)", 1},
 		{"log(1000)", 3},
-		{"floor(3.9) + ceil(1.1)", 6},
+		{"floor(3.9) + ceil(1.1)", 5},
 		{"9 % 4", 1},
 	}
 	for _, test := range tests {
