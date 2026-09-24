@@ -2,6 +2,7 @@ package filemanager
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,7 @@ const maxRequestSize = MaxUploadSize + (1 << 20)
 type apiHandler struct {
 	store Store
 	links Linker
+	token string
 }
 
 type Linker interface {
@@ -28,15 +30,33 @@ type Linker interface {
 	Detach(fileID string) error
 }
 
-func RegisterRoutes(mux *http.ServeMux, store Store, links Linker) {
-	handler := &apiHandler{store: store, links: links}
+func RegisterRoutes(mux *http.ServeMux, store Store, links Linker, token string) {
+	handler := &apiHandler{store: store, links: links, token: token}
 	mux.HandleFunc("GET /api/files", handler.list)
+	mux.HandleFunc("GET /api/files/trash", handler.trash)
+	mux.HandleFunc("DELETE /api/files/trash", handler.emptyTrash)
 	mux.HandleFunc("POST /api/files", handler.upload)
+	mux.HandleFunc("POST /api/files/{id}/restore", handler.restore)
+	mux.HandleFunc("DELETE /api/files/{id}/purge", handler.purge)
 	mux.HandleFunc("GET /api/files/{id}", handler.download)
 	mux.HandleFunc("GET /api/files/{id}/preview", handler.preview)
 	mux.HandleFunc("DELETE /api/files/{id}", handler.delete)
 	mux.HandleFunc("PUT /api/files/{id}/association", handler.associate)
 	mux.HandleFunc("GET /files", handler.page)
+}
+
+func (h *apiHandler) admin(w http.ResponseWriter, r *http.Request) bool {
+	value := r.Header.Get("X-Admin-Token")
+	if len(value) != len(h.token) || subtle.ConstantTimeCompare([]byte(value), []byte(h.token)) != 1 {
+		http.Error(w, "admin token required (see data/config/admin-token)", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func (h *apiHandler) discardUpload(id string) {
+	_ = h.links.Detach(id)
+	if err := h.store.Delete(id); err == nil { _ = h.store.Purge(id) }
 }
 
 func (h *apiHandler) list(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +66,39 @@ func (h *apiHandler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": files})
+}
+
+func (h *apiHandler) trash(w http.ResponseWriter, r *http.Request) {
+	if !h.admin(w,r) { return }
+	files, err := h.store.Trash()
+	if err != nil { http.Error(w,"could not read recycle bin",http.StatusInternalServerError); return }
+	writeJSON(w,http.StatusOK,map[string]any{"items":files})
+}
+
+func (h *apiHandler) emptyTrash(w http.ResponseWriter, r *http.Request) {
+	if !h.admin(w,r) { return }
+	files, err := h.store.Trash()
+	if err != nil { http.Error(w,"could not read recycle bin",http.StatusInternalServerError); return }
+	for _, file := range files {
+		if err := h.store.Purge(file.ID); err != nil { http.Error(w,"could not empty recycle bin",http.StatusInternalServerError); return }
+		if err := h.links.Detach(file.ID); err != nil { http.Error(w,"file removed but its content link could not be cleared",http.StatusInternalServerError); return }
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *apiHandler) restore(w http.ResponseWriter, r *http.Request) {
+	if !h.admin(w,r) { return }
+	file, err := h.store.Restore(r.PathValue("id"))
+	if errors.Is(err,ErrNotFound) { http.NotFound(w,r); return }
+	if err != nil { http.Error(w,"could not restore file",http.StatusInternalServerError); return }
+	writeJSON(w,http.StatusOK,file)
+}
+
+func (h *apiHandler) purge(w http.ResponseWriter, r *http.Request) {
+	if !h.admin(w,r) { return }
+	if err := h.store.Purge(r.PathValue("id")); errors.Is(err,ErrNotFound) { http.NotFound(w,r); return } else if err != nil { http.Error(w,"could not permanently delete file",http.StatusInternalServerError); return }
+	if err := h.links.Detach(r.PathValue("id")); err != nil { http.Error(w,"file removed but its content link could not be cleared",http.StatusInternalServerError); return }
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *apiHandler) upload(w http.ResponseWriter, r *http.Request) {
@@ -100,14 +153,13 @@ func (h *apiHandler) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if association.Type != "" {
 		if err := h.links.Attach(record.ID, association.Type, association.ID); err != nil {
-			_ = h.store.Delete(record.ID)
+			h.discardUpload(record.ID)
 			http.Error(w, "could not attach file: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 		record, err = h.store.SetAssociation(record.ID, association)
 		if err != nil {
-			_ = h.links.Detach(record.ID)
-			_ = h.store.Delete(record.ID)
+			h.discardUpload(record.ID)
 			http.Error(w, "could not store file association", http.StatusInternalServerError)
 			return
 		}
@@ -135,6 +187,7 @@ func (h *apiHandler) download(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *apiHandler) delete(w http.ResponseWriter, r *http.Request) {
+	if !h.admin(w,r) { return }
 	if err := h.store.Delete(r.PathValue("id")); errors.Is(err, ErrNotFound) {
 		http.NotFound(w, r)
 		return
@@ -142,14 +195,11 @@ func (h *apiHandler) delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not remove file", http.StatusInternalServerError)
 		return
 	}
-	if err := h.links.Detach(r.PathValue("id")); err != nil {
-		http.Error(w, "could not remove file association", http.StatusInternalServerError)
-		return
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *apiHandler) associate(w http.ResponseWriter, r *http.Request) {
+	if !h.admin(w,r) { return }
 	var input Association
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
