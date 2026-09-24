@@ -225,7 +225,7 @@ function renderWindows(){
   const card=document.createElement("article");card.className="window-card";card.dataset.windowId=String(w.id);
   const head=document.createElement("div");head.className="window-head";
   const name=document.createElement("span");name.className="window-name";const dot=document.createElement("span");dot.className="window-dot";name.append(dot,document.createTextNode("窗口 "+w.id));
-  const actions=document.createElement("div");actions.className="window-actions";actions.append(makeButton("复制表达式","mini","copy-expression",w.id),makeButton("关闭","mini","close-window",w.id,"关闭窗口"));head.append(name,actions);
+  const actions=document.createElement("div");actions.className="window-actions";const copyExpression=makeButton("复制表达式","mini","copy-expression",w.id);const copyResult=makeButton("复制结果","mini","copy-result",w.id);copyResult.disabled=!w.result;actions.append(copyExpression,copyResult,makeButton("关闭","mini","close-window",w.id,"关闭窗口"));head.append(name,actions);
   const label=document.createElement("label");label.className="window-label";label.htmlFor="expression-"+w.id;label.textContent="输入表达式";
   const input=document.createElement("input");input.id="expression-"+w.id;input.className="window-input";input.type="text";input.autocomplete="off";input.autocapitalize="off";input.spellcheck=false;input.placeholder="例如 sqrt(81) + 2^3";input.value=w.expression;input.dataset.windowId=String(w.id);input.setAttribute("aria-label","计算窗口 "+w.id+" 的表达式");
   const outputLine=document.createElement("div");outputLine.className="window-output";
@@ -245,7 +245,7 @@ function updateWindow(w){
  card.querySelector(".window-preview").textContent=w.expression?w.expression+" =":"尚未计算";
  card.querySelector(".window-result").textContent=w.display||"—";
  const status=card.querySelector(".window-status");status.textContent=w.status||"结果会保留在此窗口。";status.classList.toggle("error",Boolean(w.error));
- const button=card.querySelector('[data-action="calculate-window"]');button.textContent=w.busy?"计算中…":"计算";button.disabled=w.busy;
+ const button=card.querySelector('[data-action="calculate-window"]');button.textContent=w.busy?"计算中…":"计算";button.disabled=w.busy;card.querySelector('[data-action="copy-result"]').disabled=!w.result;
 }
 function renderHistory(){historyBox.replaceChildren();if(!historyItems.length){const p=document.createElement("p");p.className="empty";p.textContent="完成计算后会显示在这里。";historyBox.append(p);return}for(const item of historyItems){const b=document.createElement("button");b.type="button";b.className="history-item";b.dataset.expression=item.expression;b.dataset.windowId=String(item.windowId);const e=document.createElement("span");e.className="history-expr";e.textContent=item.expression;const r=document.createElement("span");r.className="history-result";r.textContent=item.display||item.result;b.append(e,r);historyBox.append(b)}}
 function saveHistory(){try{localStorage.setItem(historyKey,JSON.stringify(historyItems))}catch{}}
@@ -268,10 +268,10 @@ windowArea.addEventListener("focusin",event=>{const card=event.target.closest(".
 windowArea.addEventListener("input",event=>{if(!event.target.matches(".window-input"))return;const w=findWindow(event.target.dataset.windowId);if(!w)return;w.expression=event.target.value;w.result="";w.display="";w.status="表达式已修改，请重新计算。";w.error=false;updateWindow(w);saveWindows()});
 windowArea.addEventListener("keydown",event=>{const input=event.target.closest(".window-input");if(!input)return;if(event.key==="Enter"){event.preventDefault();calculateWindow(input.dataset.windowId)}else if(event.key==="Escape"){event.preventDefault();setActive(input.dataset.windowId);clearActive()}});
 windowArea.addEventListener("click",event=>{
- const button=event.target.closest("button[data-action]");if(!button)return;const id=Number(button.dataset.windowId),w=findWindow(id);
+ const card=event.target.closest(".window-card");if(card)setActive(card.dataset.windowId);const button=event.target.closest("button[data-action]");if(!button)return;const id=Number(button.dataset.windowId),w=findWindow(id);
  if(button.dataset.action==="calculate-window"){calculateWindow(id);return}
  if(button.dataset.action==="close-window"){if(calcWindows.length<=1){say("至少保留一个计算窗口。",true);return}calcWindows=calcWindows.filter(item=>item.id!==id);if(activeId===id)activeId=calcWindows[0].id;saveWindows();renderWindows();say("已关闭窗口 "+id+"。");return}
- if(button.dataset.action==="copy-expression"){if(w?.expression)copyText(w.expression);else say("该窗口没有可复制的表达式。",true)}
+ if(button.dataset.action==="copy-expression"){if(w?.expression)copyText(w.expression);else say("该窗口没有可复制的表达式。",true)}if(button.dataset.action==="copy-result"){if(w?.result)copyText(w.result);else say("该窗口还没有计算结果。",true)}
 });
 document.querySelector("#add-window").addEventListener("click",()=>{if(calcWindows.length>=maxWindows)return;const id=Math.max(0,...calcWindows.map(w=>w.id))+1;calcWindows.push(makeWindow(id));activeId=id;saveWindows();renderWindows();inputFor(id)?.focus();say("已添加窗口 "+id+"。")});
 document.querySelector("#keys").addEventListener("click",event=>{const b=event.target.closest("button");if(!b)return;if(b.dataset.action==="clear"){clearActive();return}if(b.dataset.action==="backspace"){const input=inputFor(activeId);if(!input)return;const start=input.selectionStart??input.value.length,end=input.selectionEnd??start;if(start===end&&start>0)input.setRangeText("",start-1,end,"end");else input.setRangeText("",start,end,"end");input.focus();input.dispatchEvent(new Event("input",{bubbles:true}));return}if(b.dataset.action==="calculate"){calculateWindow(activeId);return}if(b.dataset.fn){insert(b.dataset.fn+"(");return}if(b.dataset.insert)insert(b.dataset.insert)});
