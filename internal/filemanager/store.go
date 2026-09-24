@@ -38,6 +38,7 @@ type File struct {
 	Size         int64       `json:"size"`
 	SHA256       string      `json:"sha256"`
 	UploadedAt   time.Time   `json:"uploaded_at"`
+	DeletedAt    string      `json:"deleted_at,omitempty"`
 	Association  Association `json:"association,omitempty"`
 	DownloadURL  string      `json:"download_url,omitempty"`
 }
@@ -50,6 +51,9 @@ type Store interface {
 	Get(id string) (File, error)
 	Open(id string) (File, io.ReadCloser, error)
 	Delete(id string) error
+	Trash() ([]File, error)
+	Restore(id string) (File, error)
+	Purge(id string) error
 	SetAssociation(id string, association Association) (File, error)
 }
 
@@ -149,6 +153,7 @@ func (s *localStore) List() ([]File, error) {
 		if err := json.Unmarshal(data, &record); err != nil {
 			return nil, fmt.Errorf("decode file metadata %s: %w", entry.Name(), err)
 		}
+		if record.DeletedAt != "" { continue }
 		record.DownloadURL = "/api/files/" + record.ID
 		files = append(files, record)
 	}
@@ -166,6 +171,7 @@ func (s *localStore) Get(id string) (File, error) {
 	if err != nil {
 		return File{}, err
 	}
+	if record.DeletedAt != "" { return File{}, ErrNotFound }
 	record.DownloadURL = "/api/files/" + record.ID
 	return record, nil
 }
@@ -202,12 +208,56 @@ func (s *localStore) Delete(id string) error {
 	if filepath.Base(record.StoredName) != record.StoredName || !strings.HasPrefix(record.StoredName, record.ID) {
 		return errors.New("invalid stored file metadata")
 	}
-	if err := os.Remove(filepath.Join(s.metadata, id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove file metadata: %w", err)
+	if record.DeletedAt != "" { return ErrNotFound }
+	record.DeletedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	return s.writeMetadata(record)
+}
+
+func (s *localStore) Trash() ([]File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entries, err := os.ReadDir(s.metadata)
+	if err != nil { return nil, fmt.Errorf("read file metadata: %w", err) }
+	files := []File{}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" { continue }
+		data, err := os.ReadFile(filepath.Join(s.metadata,entry.Name()))
+		if err != nil { return nil, fmt.Errorf("read file metadata: %w",err) }
+		var record File
+		if err := json.Unmarshal(data,&record); err != nil { return nil, fmt.Errorf("decode file metadata %s: %w",entry.Name(),err) }
+		if record.DeletedAt == "" { continue }
+		record.DownloadURL = "/api/files/"+record.ID
+		files = append(files,record)
 	}
-	if err := os.Remove(filepath.Join(s.uploads, record.StoredName)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove uploaded file: %w", err)
-	}
+	sort.Slice(files,func(i,j int) bool { return files[i].DeletedAt > files[j].DeletedAt })
+	return files,nil
+}
+
+func (s *localStore) Restore(id string) (File,error) {
+	if !idPattern.MatchString(id) { return File{},ErrNotFound }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, err := s.readMetadata(id)
+	if err != nil { return File{},err }
+	if record.DeletedAt == "" { return File{},ErrNotFound }
+	if filepath.Base(record.StoredName) != record.StoredName || !strings.HasPrefix(record.StoredName,record.ID) { return File{},errors.New("invalid stored file metadata") }
+	if _, err := os.Stat(filepath.Join(s.uploads,record.StoredName)); errors.Is(err,os.ErrNotExist) { return File{},ErrNotFound } else if err != nil { return File{},err }
+	record.DeletedAt = ""
+	if err := s.writeMetadata(record); err != nil { return File{},err }
+	record.DownloadURL = "/api/files/"+record.ID
+	return record,nil
+}
+
+func (s *localStore) Purge(id string) error {
+	if !idPattern.MatchString(id) { return ErrNotFound }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, err := s.readMetadata(id)
+	if err != nil { return err }
+	if record.DeletedAt == "" { return fmt.Errorf("file must be moved to the recycle bin first") }
+	if filepath.Base(record.StoredName) != record.StoredName || !strings.HasPrefix(record.StoredName,record.ID) { return errors.New("invalid stored file metadata") }
+	if err := os.Remove(filepath.Join(s.metadata,id+".json")); err != nil && !errors.Is(err,os.ErrNotExist) { return fmt.Errorf("remove file metadata: %w",err) }
+	if err := os.Remove(filepath.Join(s.uploads,record.StoredName)); err != nil && !errors.Is(err,os.ErrNotExist) { return fmt.Errorf("remove uploaded file: %w",err) }
 	return nil
 }
 
@@ -311,4 +361,3 @@ func safeExtension(name string) string {
 	}
 	return ext
 }
-

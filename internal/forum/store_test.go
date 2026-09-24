@@ -13,6 +13,9 @@ func TestPersistenceAndAttachment(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	store, err := Open(root, files)
 	if err != nil { t.Fatal(err) }
+	defaults, err := store.Settings()
+	if err != nil { t.Fatal(err) }
+	if defaults.EnableSearch || defaults.EnableResourceRendering { t.Fatalf("optional features should default off: %+v",defaults) }
 	topics, err := store.Topics()
 	if err != nil || len(topics) != 1 { t.Fatalf("initial topic: %v, %v", topics, err) }
 	post, err := store.CreatePost(topics[0].ID, "测试文章", "正文", "作者")
@@ -37,11 +40,30 @@ func TestPersistenceAndAttachment(t *testing.T) {
 	updated, err := store.Post(post.ID)
 	if err != nil { t.Fatal(err) }
 	if updated.ReplyCount != 0 || len(updated.Replies) != 0 { t.Fatalf("reply was not removed: %+v", updated) }
+	trashedReplies, err := store.TrashReplies()
+	if err != nil || len(trashedReplies) != 1 || trashedReplies[0].ID != reply.ID { t.Fatalf("reply recycle bin: %+v, %v",trashedReplies,err) }
 	metadata, err := files.Get(file.ID)
 	if err != nil { t.Fatal(err) }
-	if metadata.Association.ID != "" { t.Fatalf("deleted reply retained attachment association: %+v", metadata.Association) }
+	if metadata.Association.ID != reply.ID { t.Fatalf("trashed reply lost attachment association: %+v", metadata.Association) }
+	if err := store.RestoreReply(reply.ID); err != nil { t.Fatal(err) }
+	updated, err = store.Post(post.ID)
+	if err != nil || len(updated.Replies) != 1 || updated.Replies[0].ID != reply.ID { t.Fatalf("restored reply: %+v, %v",updated,err) }
+	if err := store.DeleteReply(reply.ID); err != nil { t.Fatal(err) }
+	if err := store.PurgeReply(reply.ID); err != nil { t.Fatal(err) }
+	metadata, err = files.Get(file.ID)
+	if err != nil { t.Fatal(err) }
+	if metadata.Association.ID != "" { t.Fatalf("purged reply retained attachment association: %+v", metadata.Association) }
 	if err := store.Attach(file.ID, "post", post.ID); err != nil { t.Fatal(err) }
 	if err := store.DeletePost(post.ID); err != nil { t.Fatal(err) }
 	if _, err := store.Post(post.ID); err != ErrNotFound { t.Fatalf("deleted post lookup error = %v, want %v", err, ErrNotFound) }
+	trashedPosts, err := store.TrashPosts()
+	if err != nil || len(trashedPosts) != 1 || trashedPosts[0].ID != post.ID { t.Fatalf("post recycle bin: %+v, %v",trashedPosts,err) }
+	if err := store.RestorePost(post.ID); err != nil { t.Fatal(err) }
+	if _, err := store.Post(post.ID); err != nil { t.Fatalf("restored post lookup error = %v",err) }
+	if err := store.DeletePost(post.ID); err != nil { t.Fatal(err) }
+	if err := store.PurgePost(post.ID); err != nil { t.Fatal(err) }
+	metadata, err = files.Get(file.ID)
+	if err != nil { t.Fatal(err) }
+	if metadata.Association.ID != "" { t.Fatalf("purged post retained attachment association: %+v", metadata.Association) }
 	if _, opened, err := files.Open(file.ID); err != nil { t.Fatal(err) } else { opened.Close() }
 }

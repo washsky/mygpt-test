@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLocalStoreSaveListAssociateAndDelete(t *testing.T) {
+func TestLocalStoreSaveListAssociateRecycleRestoreAndPurge(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +46,17 @@ func TestLocalStoreSaveListAssociateAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.Get(record.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Get after Delete error = %v, want ErrNotFound", err)
+		t.Fatalf("Get after moving to trash error = %v, want ErrNotFound", err)
 	}
+	files, err = store.List()
+	if err != nil || len(files) != 0 { t.Fatalf("active list after delete = %d files, err = %v",len(files),err) }
+	trashed, err := store.Trash()
+	if err != nil || len(trashed) != 1 || trashed[0].ID != record.ID { t.Fatalf("trash = %+v, err = %v",trashed,err) }
+	if _, err := store.Restore(record.ID); err != nil { t.Fatal(err) }
+	if _, err := store.Get(record.ID); err != nil { t.Fatalf("Get after restore error = %v",err) }
+	if err := store.Delete(record.ID); err != nil { t.Fatal(err) }
+	if err := store.Purge(record.ID); err != nil { t.Fatal(err) }
+	if trashed, err = store.Trash(); err != nil || len(trashed) != 0 { t.Fatalf("trash after purge = %+v, err = %v",trashed,err) }
 }
 
 func TestLocalStoreRejectsOversizedUpload(t *testing.T) {

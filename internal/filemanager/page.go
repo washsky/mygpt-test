@@ -17,8 +17,9 @@ button{background:var(--accent);color:white;border:0;font-weight:650;cursor:poin
 @media(max-width:720px){form{grid-template-columns:1fr 1fr}form button{align-self:end}.item{grid-template-columns:1fr auto}.item .meta{grid-column:1}.item a,.item button{grid-row:1/3}}
 </style></head>
 <body><main>
-<div class="top"><h1>文件管理</h1><a href="/">返回论坛</a></div>
-<p class="sub">上传文件会保存在程序旁的数据目录中。单文件上限 20 MB；可以关联现有帖子或回复。</p>
+<div class="top"><h1>文件管理</h1><a href="/#trash">回收站</a> · <a href="/">返回论坛</a></div>
+<p class="sub">上传文件会保存在程序旁的数据目录中。单文件上限 20 MB；可以关联现有帖子或回复。删除文件会先移入回收站。</p>
+<section class="card"><label>管理员令牌<input id="admin-token" type="password" autocomplete="off" placeholder="用于删除、恢复和彻底清理"></label><button id="save-token" type="button">保存到本次会话</button><div class="notice" id="token-notice" role="status"></div></section>
 <section class="card">
 <form id="upload">
 <label>选择文件<input type="file" name="file" required></label>
@@ -30,9 +31,13 @@ button{background:var(--accent);color:white;border:0;font-weight:650;cursor:poin
 <section class="card"><h2>已上传文件</h2><div class="list" id="list"><div class="empty">加载中…</div></div></section>
 </main>
 <script>
-const list=document.querySelector("#list"),notice=document.querySelector("#notice");
+const list=document.querySelector("#list"),notice=document.querySelector("#notice"),tokenInput=document.querySelector("#admin-token");
+const adminToken=()=>tokenInput.value.trim()||sessionStorage.getItem("forum-admin-token")||"";
+const authHeaders=()=>adminToken()?{"X-Admin-Token":adminToken()}:{};
+tokenInput.value=sessionStorage.getItem("forum-admin-token")||"";
+document.querySelector("#save-token").onclick=()=>{sessionStorage.setItem("forum-admin-token",tokenInput.value.trim());document.querySelector("#token-notice").textContent="已保存到本次浏览器会话；重开页面后将继续生效。"};
 const sizeText=n=>n<1024? n+" B":n<1048576?(n/1024).toFixed(1)+" KB":(n/1048576).toFixed(1)+" MB";
-async function refresh(){try{const res=await fetch("/api/files");if(!res.ok)throw new Error("加载文件列表失败");const data=await res.json();if(!data.items.length){list.innerHTML='<div class="empty">还没有文件，选择文件后上传。</div>';return}list.replaceChildren(...data.items.map(file=>{const row=document.createElement("div");row.className="item";const info=document.createElement("div");const name=document.createElement("div");name.className="name";name.textContent=file.name;const meta=document.createElement("div");meta.className="meta";meta.textContent=sizeText(file.size)+" · "+new Date(file.uploaded_at).toLocaleString()+(file.association?.type?" · "+file.association.type+": "+file.association.id:"");info.append(name,meta);const download=document.createElement("a");download.href=file.download_url;download.textContent="下载";const preview=document.createElement("a");preview.href=file.download_url+"/preview";preview.textContent="预览";const remove=document.createElement("button");remove.className="danger";remove.textContent="删除";remove.onclick=async()=>{if(!confirm("删除 "+file.name+"？"))return;const response=await fetch(file.download_url,{method:"DELETE"});notice.textContent=response.ok?"已删除":"删除失败";refresh()};row.append(info,preview,download,remove);return row}))}catch(error){list.innerHTML='<div class="empty"></div>';list.firstChild.textContent=error.message}}
+async function refresh(){try{const res=await fetch("/api/files");if(!res.ok)throw new Error("加载文件列表失败");const data=await res.json();if(!data.items.length){list.innerHTML='<div class="empty">还没有文件，选择文件后上传。</div>';return}list.replaceChildren(...data.items.map(file=>{const row=document.createElement("div");row.className="item";const info=document.createElement("div");const name=document.createElement("div");name.className="name";name.textContent=file.name;const meta=document.createElement("div");meta.className="meta";meta.textContent=sizeText(file.size)+" · "+new Date(file.uploaded_at).toLocaleString()+(file.association?.type?" · "+file.association.type+": "+file.association.id:"");info.append(name,meta);const download=document.createElement("a");download.href=file.download_url;download.textContent="下载";const preview=document.createElement("a");preview.href=file.download_url+"/preview";preview.textContent="预览";const remove=document.createElement("button");remove.className="danger";remove.textContent="移入回收站";remove.onclick=async()=>{if(!confirm("将 "+file.name+" 移入回收站？"))return;const response=await fetch(file.download_url,{method:"DELETE",headers:authHeaders()});notice.textContent=response.ok?"已移入回收站":await response.text();refresh()};row.append(info,preview,download,remove);return row}))}catch(error){list.innerHTML='<div class="empty"></div>';list.firstChild.textContent=error.message}}
 document.querySelector("#upload").addEventListener("submit",async event=>{event.preventDefault();const form=event.currentTarget;notice.textContent="正在上传…";try{const response=await fetch("/api/files",{method:"POST",body:new FormData(form)});if(!response.ok)throw new Error(await response.text());form.reset();notice.textContent="上传成功";await refresh()}catch(error){notice.textContent=error.message}});
 refresh();
 </script></body></html>`;

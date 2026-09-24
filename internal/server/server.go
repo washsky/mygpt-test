@@ -45,7 +45,7 @@ func Start(addr, version, dataDir string) error {
 	token, err := board.AdminToken(paths.Config)
 	if err != nil { return err }
 	mux := http.NewServeMux()
-	filemanager.RegisterRoutes(mux, files, board)
+	filemanager.RegisterRoutes(mux, files, board, token)
 	(&forum.Handler{Store: board, Token: token}).Register(mux)
 	mux.HandleFunc("GET /calculator", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
