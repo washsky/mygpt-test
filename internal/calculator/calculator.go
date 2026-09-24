@@ -165,7 +165,7 @@ func (p *parser) primary() (float64, error) {
 		}
 		return value, nil
 	}
-	if digit(current) || current == '.' {
+	if isDigit(current) || current == '.' {
 		return p.number()
 	}
 	if letter(current) {
