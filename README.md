@@ -43,6 +43,10 @@ mygpt-test-data/
 
 旧版本上传的文件和 JSON 文件元数据会保留；回收站状态也保存在这些元数据中。帖子软删除字段会在启动时迁移到目录数据库，回复软删除字段会随对应月份分片按需升级。旧版本设置的帖子/用户占位关联不会自动变成论坛中的有效帖子关系。新的附件请从文章或回复表单上传，或在文件管理页输入真实的帖子/回复 ID。
 
+## 使用计算器
+
+访问 `/calculator` 使用科学计算器，支持表达式、括号、幂与取余、pi/e、常见三角/对数/舍入函数、最近计算记录、键盘输入、深色模式和复制。历史仅保存在当前浏览器中；表达式由 Go 后端安全解析。
+
 ## API
 
 - `GET /api/forum/settings`、`PUT /api/forum/settings`：读取或修改设置
@@ -57,7 +61,8 @@ mygpt-test-data/
 - `GET /api/files`、`POST /api/files`、`GET /api/files/{id}`、`GET /api/files/{id}/preview`：上传与读取文件
 - `DELETE /api/files/{id}`、`GET /api/files/trash`、`POST /api/files/{id}/restore`、`DELETE /api/files/{id}/purge`、`DELETE /api/files/trash`：移入、查看、恢复或彻底删除文件
 - `PUT /api/files/{id}/association`：更改文件关联
-- `POST /api/calculate`：原有计算器接口；`GET /healthz`：健康检查
+- `POST /api/calculate`：兼容旧版双数接口，支持加减乘除、取余与幂运算
+- `POST /api/calculate-expression`：安全解析表达式，支持括号、优先级、常量和科学函数；表达式最多 256 字节；`GET /healthz`：健康检查
 
 修改设置、创建主题、回收站操作、修改文件关联、删除或恢复文件需要请求头 `X-Admin-Token`。上传时使用 multipart 字段 `file`、`related_type=post|reply` 和实际记录 `related_id`；文章/回复表单上传会自动关联，文件管理页上传可选择关联。默认上传不关联任何内容。
 
