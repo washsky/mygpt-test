@@ -185,7 +185,7 @@ main{max-width:1220px;margin:32px auto 64px;padding:0 24px}.intro{margin-bottom:
 <main>
 <section class="intro"><div class="eyebrow"><span class="dot"></span>本机 Go 服务 · 无需联网</div><h1>多窗口科学计算器</h1><p>在同一页面打开多个独立计算窗口，并排计算、对比结果。支持括号、优先级、幂运算和科学函数；表达式由 Go 后端安全解析。</p></section>
 <div class="layout">
-<section class="card workspace"><div class="workspace-head"><div><h2>计算窗口 <span id="window-count" class="count"></span></h2></div><button id="add-window" class="add" type="button">＋ 添加窗口</button></div><p class="hint">每个窗口有独立表达式和结果；点击输入框或窗口即可选中，再使用下方按键。最多同时打开 4 个。</p>
+<section class="card workspace"><div class="workspace-head"><div><h2>计算窗口 <span id="window-count" class="count"></span> <span id="version" class="count">本地服务</span></h2></div><button id="add-window" class="add" type="button">＋ 添加窗口</button></div><p class="hint">每个窗口有独立表达式和结果；点击输入框或窗口即可选中，再使用下方按键。最多同时打开 4 个。</p>
 <div id="windows" class="window-grid" aria-label="计算窗口"></div>
 <div class="keys-wrap"><div class="keys-title"><strong>快捷按键</strong><span>点击窗口输入框决定写入位置</span></div><div id="keys" class="keys" aria-label="科学计算按键">
 <button class="key danger" type="button" data-action="clear">AC</button><button class="key" type="button" data-action="backspace" aria-label="退格">⌫</button><button class="key" type="button" data-insert="(">(</button><button class="key" type="button" data-insert=")">)</button><button class="key fn" type="button" data-insert="%">mod</button><button class="key op" type="button" data-insert="/">÷</button>
