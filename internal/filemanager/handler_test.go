@@ -18,7 +18,7 @@ func TestFileRecycleBinRequiresAdmin(t *testing.T) {
 	record, err := store.Save("note.txt", "text/plain", Association{}, bytes.NewBufferString("note"))
 	if err != nil { t.Fatal(err) }
 	mux := http.NewServeMux()
-	RegisterRoutes(mux,store,testLinker(),"admin-token")
+	RegisterRoutes(mux,store,testLinker{},"admin-token")
 	request := func(method,path,token string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method,path,nil)
 		if token != "" { req.Header.Set("X-Admin-Token",token) }

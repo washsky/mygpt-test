@@ -529,21 +529,57 @@ func (s *Store) attachments(kind,id string) ([]filemanager.File,error) {
 	return out,nil
 }
 
-// Attach records the file relation in SQLite. The file metadata remains readable
-// by older binaries; new content resolves attachments through this index.
-func (s *Store) Attach(fileID,kind,id string) error {
-	if kind!="post"&&kind!="reply" {return fmt.Errorf("only posts and replies accept attachments")}
-	if _,err:=s.files.Get(fileID);err!=nil{return err}
-	if kind=="post" {var found int;if err:=s.catalog.QueryRow("SELECT 1 FROM post_index WHERE id=?",id).Scan(&found);errors.Is(err,sql.ErrNoRows){return ErrNotFound}else if err!=nil{return err}}
-	if kind=="reply" {var found int;if err:=s.catalog.QueryRow("SELECT 1 FROM reply_index WHERE id=?",id).Scan(&found);errors.Is(err,sql.ErrNoRows){return ErrNotFound}else if err!=nil{return err}}
-	s.mu.Lock();defer s.mu.Unlock()
-	var oldKind,oldID string
-	err:=s.catalog.QueryRow("SELECT entity_type,entity_id FROM file_links WHERE file_id=?",fileID).Scan(&oldKind,&oldID)
-	if err==nil && (oldKind!=kind||oldID!=id){return ErrConflict};if err!=nil&&!errors.Is(err,sql.ErrNoRows){return err}
-	_,err=s.catalog.Exec("INSERT OR IGNORE INTO file_links(file_id,entity_type,entity_id) VALUES(?,?,?)",fileID,kind,id)
-	return err
-}
+// Attach records the relation in SQLite and mirrors it into the file metadata for
+// compatibility with older binaries.
+func (s *Store) Attach(fileID, kind, id string) error {
+	if kind != "post" && kind != "reply" {
+		return fmt.Errorf("only posts and replies accept attachments")
+	}
+	metadata, err := s.files.Get(fileID)
+	if err != nil {
+		return err
+	}
+	if kind == "post" {
+		var found int
+		if err := s.catalog.QueryRow("SELECT 1 FROM post_index WHERE id=?", id).Scan(&found); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+	}
+	if kind == "reply" {
+		var found int
+		if err := s.catalog.QueryRow("SELECT 1 FROM reply_index WHERE id=?", id).Scan(&found); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var oldKind, oldID string
+	err = s.catalog.QueryRow("SELECT entity_type,entity_id FROM file_links WHERE file_id=?", fileID).Scan(&oldKind, &oldID)
+	if err == nil && (oldKind != kind || oldID != id) {
+		return ErrConflict
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	association := filemanager.Association{Type: kind, ID: id}
+	if _, err := s.files.SetAssociation(fileID, association); err != nil {
+		return err
+	}
+	if _, err := s.catalog.Exec("INSERT OR IGNORE INTO file_links(file_id,entity_type,entity_id) VALUES(?,?,?)", fileID, kind, id); err != nil {
+		if _, restoreErr := s.files.SetAssociation(fileID, metadata.Association); restoreErr != nil {
+			return fmt.Errorf("record attachment: %w (restore file metadata: %v)", err, restoreErr)
+		}
+		return err
+	}
+	return nil
+}
 func (s *Store) Detach(fileID string) error {
 	_,err:=s.catalog.Exec("DELETE FROM file_links WHERE file_id=?",fileID);return err
 }
