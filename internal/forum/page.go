@@ -41,7 +41,25 @@ function resourceContent(target,value){target.replaceChildren();if(!settings.ena
 function attachments(target,files){target.replaceChildren();for(const file of files||[]){if(settings.enable_resource_rendering&&file.content_type&&file.content_type.startsWith("image/")){const image=document.createElement("img");image.src=file.download_url+"/preview";image.alt=file.name;image.loading="lazy";image.className="inline-image";target.append(image)}const span=make("span","","attachment"),preview=make("a","预览"),download=make("a","下载");preview.href=file.download_url+"/preview";preview.target="_blank";preview.rel="noopener noreferrer";download.href=file.download_url;span.append(make("span",file.name),preview,download);target.append(span)}}
 async function loadSettings(){settings=await api("/api/forum/settings");$("#site-title").textContent=settings.title;document.title=settings.title;$("#site-description").textContent=settings.description;$("#setting-title").value=settings.title;$("#setting-description").value=settings.description;$("#guest-posts").checked=settings.allow_guest_posts;$("#guest-replies").checked=settings.allow_guest_replies;$("#resource-rendering").checked=!!settings.enable_resource_rendering;$("#search-enabled").checked=!!settings.enable_search;$("#resource-help").classList.toggle("hidden",!settings.enable_resource_rendering);$("#search-form").classList.toggle("hidden",!settings.enable_search);if(!settings.enable_search){searchQuery="";$("#search-query").value=""}$("#trash-link").classList.toggle("hidden",!key());$("#editor").classList.toggle("hidden",!settings.allow_guest_posts&&!key())}
 async function loadTopics(){const data=await api("/api/forum/topics");const container=$("#topics"),select=$("#post-topic");container.replaceChildren();select.replaceChildren();const all=make("button","全部主题","topic"+(currentTopic?"":" active"));all.onclick=()=>{currentTopic="";loadTopics();loadPosts(false)};container.append(all);for(const topic of data.items){const row=make("div","","topic-row"),button=make("button",topic.name,"topic"+(topic.id===currentTopic?" active":""));button.title=topic.description;button.onclick=()=>{currentTopic=topic.id;loadTopics();loadPosts(false)};row.append(button,copyButton(topic.name+(topic.description?"\n"+topic.description:""),"复制主题"));container.append(row);const option=document.createElement("option");option.value=topic.id;option.textContent=topic.name;select.append(option)}if(currentTopic)select.value=currentTopic}
-async function loadPosts(next){if(!next){offset=0;$("#posts").replaceChildren()}let path="/api/forum/posts?limit=20&offset="+offset;if(currentTopic)path+="&topic_id="+encodeURIComponent(currentTopic);if(searchQuery)path+="&q="+encodeURIComponent(searchQuery);const data=await api(path);for(const post of data.items){const row=make("div","","post"),title=make("strong",post.title),meta=make("span",post.author+" · "+date(post.created_at)+" · "+post.reply_count+" 条回复","muted small");row.append(title,meta);if(searchQuery&&post.body)row.append(make("div",post.body.slice(0,220),"post-preview"));const tools=make("div","","admin-tools");tools.append(copyButton(post.title+(post.body?"\n\n"+post.body:""),"复制内容"));row.append(tools);row.onclick=()=>{location.hash="post/"+post.id};for(const button of tools.querySelectorAll("button"))button.onclick=event=>{event.stopPropagation();copyText(post.title+(post.body?"\n\n"+post.body:""),event.currentTarget)};$("#posts").append(row)}offset+=data.items.length;$("#more").classList.toggle("hidden",data.items.length<20);if(!offset)$("#posts").append(make("p",searchQuery?"没有找到匹配的帖子。":"这里还没有帖子，可以发布第一篇。","muted"))}
+async function loadPosts(next){
+ if(!next){offset=0;$("#posts").replaceChildren()}
+ let path="/api/forum/posts?limit=20&offset="+offset;
+ if(currentTopic)path+="&topic_id="+encodeURIComponent(currentTopic);
+ if(searchQuery)path+="&q="+encodeURIComponent(searchQuery);
+ const data=await api(path);
+ for(const post of data.items){
+  const row=make("div","","post"),title=make("strong",post.title),meta=make("span",post.author+" · "+date(post.created_at)+" · "+post.reply_count+" 条回复","muted small");
+  row.append(title,meta);
+  if(searchQuery&&post.body)row.append(make("div",post.body.slice(0,220),"post-preview"));
+  const copyValue=post.body?post.title+"\n\n"+post.body:post.title+"\n"+location.origin+"/#post/"+post.id;
+  const tools=make("div","","admin-tools"),copy=copyButton(copyValue,post.body?"复制帖子内容":"复制标题和链接");
+  copy.onclick=event=>{event.stopPropagation();copyText(copyValue,event.currentTarget)};
+  tools.append(copy);row.append(tools);row.onclick=()=>{location.hash="post/"+post.id};$("#posts").append(row);
+ }
+ offset+=data.items.length;
+ $("#more").classList.toggle("hidden",data.items.length<20);
+ if(!offset)$("#posts").append(make("p",searchQuery?"没有找到匹配的帖子。":"这里还没有帖子，可以发布第一篇。","muted"));
+}
 async function showPost(id){
  currentPost=id;show("detail");
  const post=await api("/api/forum/posts/"+encodeURIComponent(id));
