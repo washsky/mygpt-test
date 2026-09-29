@@ -80,3 +80,21 @@ func TestInteractionSettingsPersist(t *testing.T){
  got.EnableRealtime=false;got.EnableClipboard=false;if err:=store.SaveSettings(got);err!=nil{t.Fatal(err)}
  disabled,err:=store.Settings();if err!=nil{t.Fatal(err)};if disabled.EnableRealtime||disabled.EnableClipboard||!disabled.EnableLineCopy{t.Fatal("feature switches must be independent")}
 }
+
+func TestClientInfoMigrationAndPersistence(t *testing.T) {
+ root:=t.TempDir();files,err:=filemanager.NewStore(root+"/files");if err!=nil{t.Fatal(err)}
+ store,err:=Open(root,files);if err!=nil{t.Fatal(err)}
+ topics,err:=store.Topics();if err!=nil{t.Fatal(err)}
+ legacy,err:=store.CreatePost(topics[0].ID,"旧记录","正文","访客");if err!=nil{t.Fatal(err)}
+ shard,err:=store.openShard(legacy.CreatedAt[:7]);if err!=nil{t.Fatal(err)}
+ if _,err:=shard.Exec("UPDATE posts SET client_info=NULL WHERE id=?",legacy.ID);err!=nil{t.Fatal(err)}
+ if err:=shard.Close();err!=nil{t.Fatal(err)}
+ client:=ClientInfo{Browser:"Firefox 130",OS:"Linux",Device:"电脑",Language:"zh-CN",Timezone:"Asia/Shanghai"}
+ post,err:=store.CreatePostWithClient(topics[0].ID,"新记录","正文","访客",client);if err!=nil{t.Fatal(err)}
+ reply,err:=store.CreateReplyWithClient(post.ID,"回复","访客",client);if err!=nil{t.Fatal(err)}
+ if err:=store.Close();err!=nil{t.Fatal(err)}
+ store,err=Open(root,files);if err!=nil{t.Fatal(err)};defer store.Close()
+ old,err:=store.Post(legacy.ID);if err!=nil{t.Fatal(err)};if old.ClientInfo.Browser!=""{t.Fatal("legacy record unexpectedly gained browser information")}
+ loaded,err:=store.Post(post.ID);if err!=nil{t.Fatal(err)}
+ if loaded.ClientInfo!=client||len(loaded.Replies)!=1||loaded.Replies[0].ID!=reply.ID||loaded.Replies[0].ClientInfo!=client{t.Fatalf("client information lost: %+v",loaded)}
+}

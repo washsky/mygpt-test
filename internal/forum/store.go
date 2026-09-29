@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+ "encoding/json"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 )
 
 type Settings struct {
+ EnableClientInfo bool `json:"enable_client_info"`
  EnableQuoteReplies bool `json:"enable_quote_replies"`
  EnableLineNumbers bool `json:"enable_line_numbers"`
  EnableLineCopy bool `json:"enable_line_copy"`
@@ -43,7 +45,16 @@ type Topic struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type ClientInfo struct {
+ Browser string `json:"browser,omitempty"`
+ OS string `json:"os,omitempty"`
+ Device string `json:"device,omitempty"`
+ Language string `json:"language,omitempty"`
+ Timezone string `json:"timezone,omitempty"`
+}
+
 type Post struct {
+ ClientInfo ClientInfo `json:"client_info"`
 	ID string `json:"id"`
 	TopicID string `json:"topic_id"`
 	Title string `json:"title"`
@@ -57,6 +68,7 @@ type Post struct {
 }
 
 type Reply struct {
+ ClientInfo ClientInfo `json:"client_info"`
 	ID string `json:"id"`
 	PostID string `json:"post_id"`
 	Body string `json:"body"`
@@ -150,14 +162,14 @@ func newID() (string, error) {
 }
 
 func (s *Store) Settings() (Settings, error) {
-	v := Settings{Title:"我的论坛", Description:"分享想法，记录文章。", AllowGuestPosts:true, AllowGuestReplies:true, ClipboardTTLMinutes:10}
+	v := Settings{Title:"我的论坛", Description:"分享想法，记录文章。", AllowGuestPosts:true, AllowGuestReplies:true, ClipboardTTLMinutes:10, EnableClientInfo:true}
 	rows, err := s.catalog.Query("SELECT key, value FROM settings")
 	if err != nil { return v, err }
 	defer rows.Close()
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil { return v, err }
-		switch key { case "enable_quote_replies": v.EnableQuoteReplies=value=="true"; case "enable_line_numbers": v.EnableLineNumbers=value=="true"; case "enable_line_copy": v.EnableLineCopy=value=="true"; case "enable_clipboard": v.EnableClipboard=value=="true"; case "clipboard_ttl_minutes": fmt.Sscan(value,&v.ClipboardTTLMinutes); case "enable_realtime": v.EnableRealtime=value=="true"; case "enable_network_resilience": v.EnableNetworkResilience=value=="true"; case "title": v.Title=value; case "description": v.Description=value; case "allow_guest_posts": v.AllowGuestPosts=value=="true"; case "allow_guest_replies": v.AllowGuestReplies=value=="true"; case "enable_resource_rendering": v.EnableResourceRendering=value=="true"; case "enable_search": v.EnableSearch=value=="true" }
+		switch key { case "enable_client_info": v.EnableClientInfo=value=="true"; case "enable_quote_replies": v.EnableQuoteReplies=value=="true"; case "enable_line_numbers": v.EnableLineNumbers=value=="true"; case "enable_line_copy": v.EnableLineCopy=value=="true"; case "enable_clipboard": v.EnableClipboard=value=="true"; case "clipboard_ttl_minutes": fmt.Sscan(value,&v.ClipboardTTLMinutes); case "enable_realtime": v.EnableRealtime=value=="true"; case "enable_network_resilience": v.EnableNetworkResilience=value=="true"; case "title": v.Title=value; case "description": v.Description=value; case "allow_guest_posts": v.AllowGuestPosts=value=="true"; case "allow_guest_replies": v.AllowGuestReplies=value=="true"; case "enable_resource_rendering": v.EnableResourceRendering=value=="true"; case "enable_search": v.EnableSearch=value=="true" }
 	}
 	return v, rows.Err()
 }
@@ -168,7 +180,7 @@ func (s *Store) SaveSettings(v Settings) error {
 	if len(v.Title)<1 || len(v.Title)>100 || len(v.Description)>500 { return fmt.Errorf("站点名称需在 1–100 字节，简介不超过 500 字节") }
 	s.mu.Lock(); defer s.mu.Unlock()
 	tx, err := s.catalog.Begin(); if err != nil { return err }; defer tx.Rollback()
-	values := map[string]string{"enable_quote_replies":fmt.Sprint(v.EnableQuoteReplies), "enable_line_numbers":fmt.Sprint(v.EnableLineNumbers), "enable_line_copy":fmt.Sprint(v.EnableLineCopy), "enable_clipboard":fmt.Sprint(v.EnableClipboard), "clipboard_ttl_minutes":fmt.Sprint(v.ClipboardTTLMinutes), "enable_realtime":fmt.Sprint(v.EnableRealtime), "enable_network_resilience":fmt.Sprint(v.EnableNetworkResilience), "title":v.Title, "description":v.Description, "allow_guest_posts":fmt.Sprint(v.AllowGuestPosts), "allow_guest_replies":fmt.Sprint(v.AllowGuestReplies), "enable_resource_rendering":fmt.Sprint(v.EnableResourceRendering), "enable_search":fmt.Sprint(v.EnableSearch)}
+	values := map[string]string{"enable_client_info":fmt.Sprint(v.EnableClientInfo), "enable_quote_replies":fmt.Sprint(v.EnableQuoteReplies), "enable_line_numbers":fmt.Sprint(v.EnableLineNumbers), "enable_line_copy":fmt.Sprint(v.EnableLineCopy), "enable_clipboard":fmt.Sprint(v.EnableClipboard), "clipboard_ttl_minutes":fmt.Sprint(v.ClipboardTTLMinutes), "enable_realtime":fmt.Sprint(v.EnableRealtime), "enable_network_resilience":fmt.Sprint(v.EnableNetworkResilience), "title":v.Title, "description":v.Description, "allow_guest_posts":fmt.Sprint(v.AllowGuestPosts), "allow_guest_replies":fmt.Sprint(v.AllowGuestReplies), "enable_resource_rendering":fmt.Sprint(v.EnableResourceRendering), "enable_search":fmt.Sprint(v.EnableSearch)}
 	for key, value := range values { if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",key,value); err != nil { return err } }
 	return tx.Commit()
 }
@@ -202,20 +214,24 @@ func (s *Store) openShard(key string) (*sql.DB,error) {
 		if _,err=db.Exec(statement); err!=nil {db.Close();return nil,err}
 	}
 	if err := ensureColumn(db, "replies", "deleted_at"); err != nil { db.Close(); return nil, err }
+ for _,table:=range []string{"posts","replies"}{if err:=ensureColumn(db,table,"client_info");err!=nil{db.Close();return nil,err}}
 	return db,nil
 }
 
-func (s *Store) CreatePost(topicID,title,body,author string) (Post,error) {
+func (s *Store) CreatePost(topicID,title,body,author string) (Post,error) { return s.CreatePostWithClient(topicID,title,body,author,ClientInfo{}) }
+
+func (s *Store) CreatePostWithClient(topicID,title,body,author string,client ClientInfo) (Post,error) {
 	title=strings.TrimSpace(title);body=strings.TrimSpace(body);author=strings.TrimSpace(author)
 	if len(title)<1||len(title)>200||len(body)<1||len(body)>100000||len(author)<1||len(author)>80 {return Post{},fmt.Errorf("标题、正文或署名长度无效")}
 	var exists int
 	if err:=s.catalog.QueryRow("SELECT 1 FROM topics WHERE id=?",topicID).Scan(&exists);err!=nil {if errors.Is(err,sql.ErrNoRows){return Post{},ErrNotFound};return Post{},err}
 	id,err:=newID();if err!=nil{return Post{},err}
 	now:=time.Now().UTC();key:=now.Format("2006-01")
-	v:=Post{ID:id,TopicID:topicID,Title:title,Body:body,Author:author,CreatedAt:now.Format(time.RFC3339Nano),Attachments:[]filemanager.File{},Replies:[]Reply{}}
+	v:=Post{ID:id,TopicID:topicID,Title:title,Body:body,Author:author,ClientInfo:client,CreatedAt:now.Format(time.RFC3339Nano),Attachments:[]filemanager.File{},Replies:[]Reply{}}
 	s.mu.Lock();defer s.mu.Unlock()
 	shard,err:=s.openShard(key);if err!=nil{return Post{},err};defer shard.Close()
-	if _,err=shard.Exec("INSERT INTO posts(id,body) VALUES(?,?)",id,body);err!=nil{return Post{},err}
+	info,_:=json.Marshal(client)
+ if _,err=shard.Exec("INSERT INTO posts(id,body,client_info) VALUES(?,?,?)",id,body,string(info));err!=nil{return Post{},err}
 	if _,err=s.catalog.Exec("INSERT INTO post_index(id,topic_id,title,author,created_at,shard) VALUES(?,?,?,?,?,?)",id,topicID,title,author,v.CreatedAt,key);err!=nil {shard.Exec("DELETE FROM posts WHERE id=?",id);return Post{},err}
 	return v,nil
 }
@@ -277,26 +293,31 @@ func (s *Store) Post(id string) (Post,error) {
 	err:=s.catalog.QueryRow("SELECT id,topic_id,title,author,created_at,reply_count,shard FROM post_index WHERE id=? AND deleted_at IS NULL",id).Scan(&v.ID,&v.TopicID,&v.Title,&v.Author,&v.CreatedAt,&v.ReplyCount,&key)
 	if errors.Is(err,sql.ErrNoRows){return v,ErrNotFound};if err!=nil{return v,err}
 	shard,err:=s.openShard(key);if err!=nil{return v,err};defer shard.Close()
-	if err=shard.QueryRow("SELECT body FROM posts WHERE id=?",id).Scan(&v.Body);err!=nil{return v,err}
+	var postInfo sql.NullString
+ if err=shard.QueryRow("SELECT body,client_info FROM posts WHERE id=?",id).Scan(&v.Body,&postInfo);err!=nil{return v,err}
+ if postInfo.Valid{_ = json.Unmarshal([]byte(postInfo.String),&v.ClientInfo)}
 	v.Attachments,err=s.attachments("post",id);if err!=nil{return v,err}
-	rows,err:=shard.Query("SELECT id,post_id,author,body,created_at FROM replies WHERE post_id=? AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 500",id);if err!=nil{return v,err}
+	rows,err:=shard.Query("SELECT id,post_id,author,body,created_at,client_info FROM replies WHERE post_id=? AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 500",id);if err!=nil{return v,err}
 	v.Replies=[]Reply{}
-	for rows.Next(){var reply Reply;if err=rows.Scan(&reply.ID,&reply.PostID,&reply.Author,&reply.Body,&reply.CreatedAt);err!=nil{rows.Close();return v,err};v.Replies=append(v.Replies,reply)}
+	for rows.Next(){var reply Reply;var info sql.NullString;if err=rows.Scan(&reply.ID,&reply.PostID,&reply.Author,&reply.Body,&reply.CreatedAt,&info);err!=nil{rows.Close();return v,err};if info.Valid{_ = json.Unmarshal([]byte(info.String),&reply.ClientInfo)};v.Replies=append(v.Replies,reply)}
 	err=rows.Err();rows.Close();if err!=nil{return v,err}
 	for i:=range v.Replies {v.Replies[i].Attachments,err=s.attachments("reply",v.Replies[i].ID);if err!=nil{return v,err}}
 	return v,nil
 }
 
-func (s *Store) CreateReply(postID,body,author string) (Reply,error) {
+func (s *Store) CreateReply(postID,body,author string) (Reply,error) { return s.CreateReplyWithClient(postID,body,author,ClientInfo{}) }
+
+func (s *Store) CreateReplyWithClient(postID,body,author string,client ClientInfo) (Reply,error) {
 	body=strings.TrimSpace(body);author=strings.TrimSpace(author)
 	if len(body)<1||len(body)>20000||len(author)<1||len(author)>80{return Reply{},fmt.Errorf("回复或署名长度无效")}
 	var key string
 	if err:=s.catalog.QueryRow("SELECT shard FROM post_index WHERE id=? AND deleted_at IS NULL",postID).Scan(&key);errors.Is(err,sql.ErrNoRows){return Reply{},ErrNotFound}else if err!=nil{return Reply{},err}
 	id,err:=newID();if err!=nil{return Reply{},err}
-	v:=Reply{ID:id,PostID:postID,Body:body,Author:author,CreatedAt:time.Now().UTC().Format(time.RFC3339Nano),Attachments:[]filemanager.File{}}
+	v:=Reply{ID:id,PostID:postID,Body:body,Author:author,ClientInfo:client,CreatedAt:time.Now().UTC().Format(time.RFC3339Nano),Attachments:[]filemanager.File{}}
 	s.mu.Lock();defer s.mu.Unlock()
 	shard,err:=s.openShard(key);if err!=nil{return Reply{},err};defer shard.Close()
-	if _,err=shard.Exec("INSERT INTO replies(id,post_id,author,body,created_at) VALUES(?,?,?,?,?)",id,postID,author,body,v.CreatedAt);err!=nil{return Reply{},err}
+	info,_:=json.Marshal(client)
+ if _,err=shard.Exec("INSERT INTO replies(id,post_id,author,body,created_at,client_info) VALUES(?,?,?,?,?,?)",id,postID,author,body,v.CreatedAt,string(info));err!=nil{return Reply{},err}
 	tx,err:=s.catalog.Begin();if err!=nil{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},err};defer tx.Rollback()
 	if _,err=tx.Exec("INSERT INTO reply_index(id,post_id,shard) VALUES(?,?,?)",id,postID,key);err!=nil{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},err}
 	result,err:=tx.Exec("UPDATE post_index SET reply_count=reply_count+1 WHERE id=? AND deleted_at IS NULL",postID);if err!=nil{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},err};if count,_:=result.RowsAffected();count==0{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},ErrNotFound}
