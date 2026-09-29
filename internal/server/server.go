@@ -58,7 +58,9 @@ func Start(addr, version, dataDir string) error {
 	token, err := board.AdminToken(paths.Config)
 	if err != nil { return err }
 	mux := http.NewServeMux()
- events := live.New(func() (live.Options,error) { s,err:=board.Settings();return live.Options{Realtime:s.EnableRealtime,Clipboard:s.EnableClipboard},err },token)
+ events,err := live.New(func() (live.Options,error) { s,err:=board.Settings();return live.Options{Realtime:s.EnableRealtime,Clipboard:s.EnableClipboard,ClipboardTTLMinutes:s.ClipboardTTLMinutes},err },paths.Database,files)
+ if err!=nil{return err}
+ defer events.Close()
  events.Register(mux)
 	filemanager.RegisterRoutes(mux, files, board, token)
 	(&forum.Handler{Store: board, Token: token}).Register(mux)
@@ -269,7 +271,7 @@ async function calculateWindow(id){
  }catch(error){w.result="";w.display="错误";w.status=error.message||"计算失败";w.error=true;say("窗口 "+w.id+"："+w.status,true)}
  finally{w.busy=false;input.readOnly=false;updateWindow(w);saveWindows()}
 }
-async function copyText(text){try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(text);else{const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.append(area);area.select();const ok=document.execCommand("copy");area.remove();if(!ok)throw new Error("copy failed")}say("已复制到剪贴板。")}catch{say("复制失败，请检查浏览器剪贴板权限。",true)}}
+async function copyText(text){try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(text);else{const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.append(area);area.select();const ok=document.execCommand("copy");area.remove();if(!ok)throw new Error("copy failed")}const shared=await window.workspaceShareText?.(text);say(shared?"已复制并加入共享历史。":"已复制到剪贴板。")}catch{say("复制失败，请检查浏览器剪贴板权限。",true)}}
 windowArea.addEventListener("focusin",event=>{const card=event.target.closest(".window-card");if(card)setActive(card.dataset.windowId)});
 windowArea.addEventListener("input",event=>{if(!event.target.matches(".window-input"))return;const w=findWindow(event.target.dataset.windowId);if(!w)return;w.expression=event.target.value;w.result="";w.display="";w.status="表达式已修改，请重新计算。";w.error=false;updateWindow(w);saveWindows()});
 windowArea.addEventListener("keydown",event=>{const input=event.target.closest(".window-input");if(!input)return;if(event.key==="Enter"){event.preventDefault();calculateWindow(input.dataset.windowId)}else if(event.key==="Escape"){event.preventDefault();setActive(input.dataset.windowId);clearActive()}});
