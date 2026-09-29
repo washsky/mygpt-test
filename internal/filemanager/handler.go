@@ -43,6 +43,16 @@ func RegisterRoutes(mux *http.ServeMux, store Store, links Linker, token string)
 	mux.HandleFunc("DELETE /api/files/{id}", handler.delete)
 	mux.HandleFunc("PUT /api/files/{id}/association", handler.associate)
 	mux.HandleFunc("GET /files", handler.page)
+ mux.HandleFunc("GET /files/view/{id}", func(w http.ResponseWriter, r *http.Request) {
+ w.Header().Set("Content-Type", "text/html; charset=utf-8")
+ _, _ = io.WriteString(w, previewPage)
+ })
+ mux.HandleFunc("GET /api/files/{id}/info", func(w http.ResponseWriter, r *http.Request) {
+ record, err := store.Get(r.PathValue("id"))
+ if errors.Is(err, ErrNotFound) { http.NotFound(w, r); return }
+ if err != nil { http.Error(w, "could not read file", http.StatusInternalServerError); return }
+ writeJSON(w, http.StatusOK, record)
+ })
 }
 
 func (h *apiHandler) admin(w http.ResponseWriter, r *http.Request) bool {

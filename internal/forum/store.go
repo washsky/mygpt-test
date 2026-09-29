@@ -590,3 +590,19 @@ func (s *Store) AdminToken(configDir string) (string,error) {
 	if errors.Is(err,os.ErrNotExist){token,err:=newID();if err!=nil{return "",err};file,err:=os.OpenFile(path,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if errors.Is(err,os.ErrExist){return s.AdminToken(configDir)};if err!=nil{return "",err};_,err=file.WriteString(token+"\n");closeErr:=file.Close();if err!=nil{return "",err};if closeErr!=nil{return "",closeErr};return token,nil}
 	if err!=nil{return "",err};token:=strings.TrimSpace(string(data));if len(token)!=32{return "",fmt.Errorf("invalid admin token in %s",path)};return token,nil
 }
+
+// ReplyPostID resolves a reply only when both it and its parent are live.
+func (s *Store) ReplyPostID(id string) (string, error) {
+ var postID, key string
+ err := s.catalog.QueryRow("SELECT r.post_id,r.shard FROM reply_index r JOIN post_index p ON p.id=r.post_id WHERE r.id=? AND p.deleted_at IS NULL", id).Scan(&postID, &key)
+ if errors.Is(err, sql.ErrNoRows) { return "", ErrNotFound }
+ if err != nil { return "", err }
+ shard, err := s.openShard(key)
+ if err != nil { return "", err }
+ defer shard.Close()
+ var liveID string
+ err = shard.QueryRow("SELECT id FROM replies WHERE id=? AND deleted_at IS NULL", id).Scan(&liveID)
+ if errors.Is(err, sql.ErrNoRows) { return "", ErrNotFound }
+ if err != nil { return "", err }
+ return postID, nil
+}

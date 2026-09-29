@@ -15,6 +15,7 @@ import (
 	"github.com/washsky/mygpt-test/internal/calculator"
 	"github.com/washsky/mygpt-test/internal/filemanager"
 	"github.com/washsky/mygpt-test/internal/forum"
+ "github.com/washsky/mygpt-test/internal/ui"
 )
 
 type calculationRequest struct {
@@ -178,12 +179,12 @@ main{max-width:1220px;margin:32px auto 64px;padding:0 24px}.intro{margin-bottom:
 @media(max-width:900px){main{margin-top:24px}.layout{grid-template-columns:1fr}.side{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.topbar{height:60px;padding:0 13px}.nav{gap:2px;font-size:12px}.nav a{padding:7px}.brand{font-size:14px}.mark{width:30px;height:30px}main{margin:20px auto 42px;padding:0 12px}.intro{margin-bottom:16px}.workspace{padding:13px;border-radius:17px}.workspace-head{align-items:flex-start}.window-grid{grid-template-columns:1fr}.keys{gap:5px}.key{height:41px;border-radius:9px}.side{grid-template-columns:1fr}.window-result{font-size:20px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
-</style>
+</style>` + ui.Head + `
 </head>
 <body>
-<header class="topbar"><a class="brand" href="/"><span class="mark">∑</span><span>mygpt-test</span></a><nav class="nav" aria-label="主导航"><a href="/">论坛</a><a href="/files">文件管理</a><button id="theme" class="theme" type="button" aria-label="切换深色模式">◐</button></nav></header>
+` + ui.Nav + `
 <main>
-<section class="intro"><div class="eyebrow"><span class="dot"></span>本机 Go 服务 · 无需联网</div><h1>多窗口科学计算器</h1><p>在同一页面打开多个独立计算窗口，并排计算、对比结果。支持括号、优先级、幂运算和科学函数；表达式由 Go 后端安全解析。</p></section>
+<section class="intro"><div class="eyebrow"><span class="dot"></span>工作空间 / 随手计算</div><h1>计算工具</h1><p>并排比较不同方案，一键把计算过程存入笔记，和资料放在一起。</p></section>
 <div class="layout">
 <section class="card workspace"><div class="workspace-head"><div><h2>计算窗口 <span id="window-count" class="count"></span> <span id="version" class="count">本地服务</span></h2></div><button id="add-window" class="add" type="button">＋ 添加窗口</button></div><p class="hint">每个窗口有独立表达式和结果；点击输入框或窗口即可选中，再使用下方按键。最多同时打开 4 个。</p>
 <div id="windows" class="window-grid" aria-label="计算窗口"></div>
@@ -194,7 +195,7 @@ main{max-width:1220px;margin:32px auto 64px;padding:0 24px}.intro{margin-bottom:
 <button class="key" type="button" data-insert="4">4</button><button class="key" type="button" data-insert="5">5</button><button class="key" type="button" data-insert="6">6</button><button class="key fn" type="button" data-fn="abs">abs</button><button class="key fn" type="button" data-insert="pi">π</button><button class="key op" type="button" data-insert="-">−</button>
 <button class="key" type="button" data-insert="1">1</button><button class="key" type="button" data-insert="2">2</button><button class="key" type="button" data-insert="3">3</button><button class="key fn" type="button" data-fn="floor">floor</button><button class="key fn" type="button" data-fn="ceil">ceil</button><button class="key op" type="button" data-insert="+">+</button>
 <button class="key" type="button" data-insert="0">0</button><button class="key" type="button" data-insert="00">00</button><button class="key" type="button" data-insert=".">.</button><button class="key fn" type="button" data-insert="e">e</button><button class="key equals" type="button" data-action="calculate">计算 =</button>
-</div><p id="global-status" class="global-status" role="status">按 Enter 计算当前窗口；Esc 清空当前表达式。</p><p class="api">旧接口 <code>POST /api/calculate</code> 仍兼容 · 表达式接口 <code>POST /api/calculate-expression</code></p></div>
+</div><p id="global-status" class="global-status" role="status">按 Enter 计算当前窗口；Esc 清空当前表达式。</p><p class="hint">计算完成后，点击窗口中的“保存为笔记”即可带着表达式和结果回到论坛。</p></div>
 </section>
 <aside class="side">
 <section class="card side-card"><h2 class="side-title">科学运算 <span class="badge">安全解析</span></h2><ul class="list">
@@ -225,7 +226,7 @@ function renderWindows(){
   const card=document.createElement("article");card.className="window-card";card.dataset.windowId=String(w.id);
   const head=document.createElement("div");head.className="window-head";
   const name=document.createElement("span");name.className="window-name";const dot=document.createElement("span");dot.className="window-dot";name.append(dot,document.createTextNode("窗口 "+w.id));
-  const actions=document.createElement("div");actions.className="window-actions";const copyExpression=makeButton("复制表达式","mini","copy-expression",w.id);const copyResult=makeButton("复制结果","mini","copy-result",w.id);copyResult.disabled=!w.result;actions.append(copyExpression,copyResult,makeButton("关闭","mini","close-window",w.id,"关闭窗口"));head.append(name,actions);
+  const actions=document.createElement("div");actions.className="window-actions";const copyExpression=makeButton("复制表达式","mini","copy-expression",w.id);const copyResult=makeButton("复制结果","mini","copy-result",w.id);copyResult.disabled=!w.result;actions.append(copyExpression,copyResult,makeButton("关闭","mini","close-window",w.id,"关闭窗口"));const note=makeButton("保存为笔记","mini","save-note",w.id);note.disabled=!w.result;actions.append(note);head.append(name,actions);
   const label=document.createElement("label");label.className="window-label";label.htmlFor="expression-"+w.id;label.textContent="输入表达式";
   const input=document.createElement("input");input.id="expression-"+w.id;input.className="window-input";input.type="text";input.autocomplete="off";input.autocapitalize="off";input.spellcheck=false;input.placeholder="例如 sqrt(81) + 2^3";input.value=w.expression;input.dataset.windowId=String(w.id);input.setAttribute("aria-label","计算窗口 "+w.id+" 的表达式");
   const outputLine=document.createElement("div");outputLine.className="window-output";
@@ -245,7 +246,7 @@ function updateWindow(w){
  card.querySelector(".window-preview").textContent=w.expression?w.expression+" =":"尚未计算";
  card.querySelector(".window-result").textContent=w.display||"—";
  const status=card.querySelector(".window-status");status.textContent=w.status||"结果会保留在此窗口。";status.classList.toggle("error",Boolean(w.error));
- const button=card.querySelector('[data-action="calculate-window"]');button.textContent=w.busy?"计算中…":"计算";button.disabled=w.busy;card.querySelector('[data-action="copy-result"]').disabled=!w.result;
+ const button=card.querySelector('[data-action="calculate-window"]');button.textContent=w.busy?"计算中…":"计算";button.disabled=w.busy;card.querySelector('[data-action="copy-result"]').disabled=!w.result;card.querySelector('[data-action="save-note"]').disabled=!w.result;
 }
 function renderHistory(){historyBox.replaceChildren();if(!historyItems.length){const p=document.createElement("p");p.className="empty";p.textContent="完成计算后会显示在这里。";historyBox.append(p);return}for(const item of historyItems){const b=document.createElement("button");b.type="button";b.className="history-item";b.dataset.expression=item.expression;b.dataset.windowId=String(item.windowId);const e=document.createElement("span");e.className="history-expr";e.textContent=item.expression;const r=document.createElement("span");r.className="history-result";r.textContent=item.display||item.result;b.append(e,r);historyBox.append(b)}}
 function saveHistory(){try{localStorage.setItem(historyKey,JSON.stringify(historyItems))}catch{}}
@@ -269,6 +270,7 @@ windowArea.addEventListener("input",event=>{if(!event.target.matches(".window-in
 windowArea.addEventListener("keydown",event=>{const input=event.target.closest(".window-input");if(!input)return;if(event.key==="Enter"){event.preventDefault();calculateWindow(input.dataset.windowId)}else if(event.key==="Escape"){event.preventDefault();setActive(input.dataset.windowId);clearActive()}});
 windowArea.addEventListener("click",event=>{
  const card=event.target.closest(".window-card");if(card)setActive(card.dataset.windowId);const button=event.target.closest("button[data-action]");if(!button)return;const id=Number(button.dataset.windowId),w=findWindow(id);
+ if(button.dataset.action==="save-note"){if(!w?.result)return;try{sessionStorage.setItem("workspace-calculation-note",JSON.stringify({body:w.expression+" = "+w.result}));location.href="/#compose"}catch(_){say("浏览器无法暂存计算记录，请复制结果后粘贴到笔记。",true)}return}
  if(button.dataset.action==="calculate-window"){calculateWindow(id);return}
  if(button.dataset.action==="close-window"){if(calcWindows.length<=1){say("至少保留一个计算窗口。",true);return}calcWindows=calcWindows.filter(item=>item.id!==id);if(activeId===id)activeId=calcWindows[0].id;saveWindows();renderWindows();say("已关闭窗口 "+id+"。");return}
  if(button.dataset.action==="copy-expression"){if(w?.expression)copyText(w.expression);else say("该窗口没有可复制的表达式。",true)}if(button.dataset.action==="copy-result"){if(w?.result)copyText(w.result);else say("该窗口还没有计算结果。",true)}
@@ -278,10 +280,8 @@ document.querySelector("#keys").addEventListener("click",event=>{const b=event.t
 document.addEventListener("keydown",event=>{if(event.ctrlKey||event.metaKey||event.altKey||event.target.matches("input,textarea,button,select"))return;if(event.key==="Escape"){clearActive();return}if(event.key==="Backspace"){event.preventDefault();const input=inputFor(activeId);if(input){const end=input.value.length;input.setRangeText("",Math.max(0,end-1),end,"end");input.focus();input.dispatchEvent(new Event("input",{bubbles:true}))}return}if(event.key==="Enter"){calculateWindow(activeId);return}if(event.key.length===1&&"0123456789.+-*/%^()".includes(event.key))insert(event.key)});
 historyBox.addEventListener("click",event=>{const button=event.target.closest("[data-expression]");if(!button)return;const w=findWindow(button.dataset.windowId)||findWindow(activeId);if(!w)return;w.expression=button.dataset.expression;w.result="";w.display="";w.status="已从历史载入，请重新计算。";w.error=false;activeId=w.id;renderWindows();saveWindows();inputFor(w.id)?.focus();calculateWindow(w.id)});
 document.querySelector("#clear-history").addEventListener("click",()=>{historyItems=[];saveHistory();renderHistory();say("计算记录已清空。")});
-const themeButton=document.querySelector("#theme");try{if(localStorage.getItem("mygpt.calculator.theme")==="dark")document.documentElement.dataset.theme="dark"}catch{}
-themeButton.addEventListener("click",()=>{const dark=document.documentElement.dataset.theme!=="dark";if(dark)document.documentElement.dataset.theme="dark";else delete document.documentElement.dataset.theme;try{localStorage.setItem("mygpt.calculator.theme",dark?"dark":"light")}catch{}});
 fetch("/healthz").then(r=>r.json()).then(data=>{document.querySelector("#version").textContent=data.version||"本地服务";document.querySelector("#footer-version").textContent=data.version||"本地服务"}).catch(()=>{document.querySelector("#version").textContent="本地服务";document.querySelector("#footer-version").textContent="本地服务"});
 renderWindows();renderHistory();
-</script>
+</script>` + ui.Foot + `
 </body>
 </html>`
