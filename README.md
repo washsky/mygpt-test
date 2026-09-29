@@ -51,6 +51,7 @@ mygpt-test-data/
 
 - `GET /api/forum/settings`、`PUT /api/forum/settings`：读取或修改设置
 - `GET /api/forum/topics`、`POST /api/forum/topics`：主题列表或创建主题
+- `DELETE /api/forum/topics/{id}?move_to={target}`：管理员删除主题；非空主题需指定接收帖子的其他主题，回收站记录也会转移
 - `GET /api/forum/posts?topic_id=...&limit=20&offset=0`、`POST /api/forum/posts`：文章列表或创建文章
 - `GET /api/forum/posts?q=...`：搜索；需先在论坛设置中启用
 - `GET /api/forum/posts/{id}`、`POST /api/forum/posts/{id}/replies`：文章、回复及其附件

@@ -1,6 +1,8 @@
 package forum
 
 import (
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -97,4 +99,33 @@ func TestClientInfoMigrationAndPersistence(t *testing.T) {
  old,err:=store.Post(legacy.ID);if err!=nil{t.Fatal(err)};if old.ClientInfo.Browser!=""{t.Fatal("legacy record unexpectedly gained browser information")}
  loaded,err:=store.Post(post.ID);if err!=nil{t.Fatal(err)}
  if loaded.ClientInfo!=client||len(loaded.Replies)!=1||loaded.Replies[0].ID!=reply.ID||loaded.Replies[0].ClientInfo!=client{t.Fatalf("client information lost: %+v",loaded)}
+}
+
+func TestDeleteTopicPreservesPostsAndTrash(t *testing.T) {
+ root:=t.TempDir();files,err:=filemanager.NewStore(root+"/files");if err!=nil{t.Fatal(err)}
+ store,err:=Open(root,files);if err!=nil{t.Fatal(err)};defer store.Close()
+ topic,err:=store.CreateTopic("可删除","空主题");if err!=nil{t.Fatal(err)}
+ if err:=store.DeleteTopic(topic.ID,"");err!=nil{t.Fatal(err)}
+ if err:=store.DeleteTopic(topic.ID,"");!errors.Is(err,ErrNotFound){t.Fatalf("missing topic: %v",err)}
+ topic,err=store.CreateTopic("有帖子","不可删除");if err!=nil{t.Fatal(err)}
+ post,err:=store.CreatePost(topic.ID,"记录","正文","我");if err!=nil{t.Fatal(err)}
+ if err:=store.DeleteTopic(topic.ID,"");!errors.Is(err,ErrConflict){t.Fatalf("active post should block deletion: %v",err)}
+ if err:=store.DeletePost(post.ID);err!=nil{t.Fatal(err)}
+ if err:=store.DeleteTopic(topic.ID,"");!errors.Is(err,ErrConflict){t.Fatalf("trashed post should block deletion: %v",err)}
+ target,err:=store.CreateTopic("接收","保留内容");if err!=nil{t.Fatal(err)}
+ if err:=store.DeleteTopic(topic.ID,target.ID);err!=nil{t.Fatal(err)}
+ if got,err:=store.Posts(target.ID,20,0);err!=nil||len(got)!=0{t.Fatalf("trashed post should remain hidden: %+v %v",got,err)}
+ if err:=store.RestorePost(post.ID);err!=nil{t.Fatal(err)}
+ got,err:=store.Post(post.ID);if err!=nil||got.TopicID!=target.ID{t.Fatalf("moved post lost: %+v %v",got,err)}
+}
+
+func TestSelectedClientInfo(t *testing.T) {
+ settings:=Settings{EnableClientInfo:true,ClientBrowser:true,ClientTimezone:true}
+ request:=httptest.NewRequest("POST","/",nil)
+ request.Header.Set("User-Agent","Mozilla/5.0 (Windows NT 10.0) Chrome/130.0.0.0")
+ request.Header.Set("Accept-Language","zh-CN,zh;q=0.9")
+ info:=selectedClientInfo(settings,request,"Asia/Shanghai")
+ if info.Browser!="Chrome 130"||info.Timezone!="Asia/Shanghai"||info.OS!=""||info.Device!=""||info.Language!=""{t.Fatalf("selected fields: %+v",info)}
+ settings.EnableClientInfo=false
+ if got:=selectedClientInfo(settings,request,"Asia/Shanghai");got!=(ClientInfo{}){t.Fatalf("disabled collection: %+v",got)}
 }

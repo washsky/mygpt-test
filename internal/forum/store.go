@@ -22,6 +22,11 @@ import (
 
 type Settings struct {
  EnableClientInfo bool `json:"enable_client_info"`
+ ClientBrowser bool `json:"client_browser"`
+ ClientOS bool `json:"client_os"`
+ ClientDevice bool `json:"client_device"`
+ ClientLanguage bool `json:"client_language"`
+ ClientTimezone bool `json:"client_timezone"`
  EnableQuoteReplies bool `json:"enable_quote_replies"`
  EnableLineNumbers bool `json:"enable_line_numbers"`
  EnableLineCopy bool `json:"enable_line_copy"`
@@ -162,14 +167,14 @@ func newID() (string, error) {
 }
 
 func (s *Store) Settings() (Settings, error) {
-	v := Settings{Title:"我的论坛", Description:"分享想法，记录文章。", AllowGuestPosts:true, AllowGuestReplies:true, ClipboardTTLMinutes:10, EnableClientInfo:true}
+ v := Settings{Title:"我的论坛", Description:"分享想法，记录文章。", AllowGuestPosts:true, AllowGuestReplies:true, ClipboardTTLMinutes:10, EnableClientInfo:true, ClientBrowser:true, ClientOS:true, ClientDevice:true, ClientLanguage:true, ClientTimezone:true}
 	rows, err := s.catalog.Query("SELECT key, value FROM settings")
 	if err != nil { return v, err }
 	defer rows.Close()
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil { return v, err }
-		switch key { case "enable_client_info": v.EnableClientInfo=value=="true"; case "enable_quote_replies": v.EnableQuoteReplies=value=="true"; case "enable_line_numbers": v.EnableLineNumbers=value=="true"; case "enable_line_copy": v.EnableLineCopy=value=="true"; case "enable_clipboard": v.EnableClipboard=value=="true"; case "clipboard_ttl_minutes": fmt.Sscan(value,&v.ClipboardTTLMinutes); case "enable_realtime": v.EnableRealtime=value=="true"; case "enable_network_resilience": v.EnableNetworkResilience=value=="true"; case "title": v.Title=value; case "description": v.Description=value; case "allow_guest_posts": v.AllowGuestPosts=value=="true"; case "allow_guest_replies": v.AllowGuestReplies=value=="true"; case "enable_resource_rendering": v.EnableResourceRendering=value=="true"; case "enable_search": v.EnableSearch=value=="true" }
+		switch key { case "enable_client_info": v.EnableClientInfo=value=="true"; case "client_browser": v.ClientBrowser=value=="true"; case "client_os": v.ClientOS=value=="true"; case "client_device": v.ClientDevice=value=="true"; case "client_language": v.ClientLanguage=value=="true"; case "client_timezone": v.ClientTimezone=value=="true"; case "enable_quote_replies": v.EnableQuoteReplies=value=="true"; case "enable_line_numbers": v.EnableLineNumbers=value=="true"; case "enable_line_copy": v.EnableLineCopy=value=="true"; case "enable_clipboard": v.EnableClipboard=value=="true"; case "clipboard_ttl_minutes": fmt.Sscan(value,&v.ClipboardTTLMinutes); case "enable_realtime": v.EnableRealtime=value=="true"; case "enable_network_resilience": v.EnableNetworkResilience=value=="true"; case "title": v.Title=value; case "description": v.Description=value; case "allow_guest_posts": v.AllowGuestPosts=value=="true"; case "allow_guest_replies": v.AllowGuestReplies=value=="true"; case "enable_resource_rendering": v.EnableResourceRendering=value=="true"; case "enable_search": v.EnableSearch=value=="true" }
 	}
 	return v, rows.Err()
 }
@@ -180,7 +185,7 @@ func (s *Store) SaveSettings(v Settings) error {
 	if len(v.Title)<1 || len(v.Title)>100 || len(v.Description)>500 { return fmt.Errorf("站点名称需在 1–100 字节，简介不超过 500 字节") }
 	s.mu.Lock(); defer s.mu.Unlock()
 	tx, err := s.catalog.Begin(); if err != nil { return err }; defer tx.Rollback()
-	values := map[string]string{"enable_client_info":fmt.Sprint(v.EnableClientInfo), "enable_quote_replies":fmt.Sprint(v.EnableQuoteReplies), "enable_line_numbers":fmt.Sprint(v.EnableLineNumbers), "enable_line_copy":fmt.Sprint(v.EnableLineCopy), "enable_clipboard":fmt.Sprint(v.EnableClipboard), "clipboard_ttl_minutes":fmt.Sprint(v.ClipboardTTLMinutes), "enable_realtime":fmt.Sprint(v.EnableRealtime), "enable_network_resilience":fmt.Sprint(v.EnableNetworkResilience), "title":v.Title, "description":v.Description, "allow_guest_posts":fmt.Sprint(v.AllowGuestPosts), "allow_guest_replies":fmt.Sprint(v.AllowGuestReplies), "enable_resource_rendering":fmt.Sprint(v.EnableResourceRendering), "enable_search":fmt.Sprint(v.EnableSearch)}
+	values := map[string]string{"enable_client_info":fmt.Sprint(v.EnableClientInfo), "client_browser":fmt.Sprint(v.ClientBrowser), "client_os":fmt.Sprint(v.ClientOS), "client_device":fmt.Sprint(v.ClientDevice), "client_language":fmt.Sprint(v.ClientLanguage), "client_timezone":fmt.Sprint(v.ClientTimezone), "enable_quote_replies":fmt.Sprint(v.EnableQuoteReplies), "enable_line_numbers":fmt.Sprint(v.EnableLineNumbers), "enable_line_copy":fmt.Sprint(v.EnableLineCopy), "enable_clipboard":fmt.Sprint(v.EnableClipboard), "clipboard_ttl_minutes":fmt.Sprint(v.ClipboardTTLMinutes), "enable_realtime":fmt.Sprint(v.EnableRealtime), "enable_network_resilience":fmt.Sprint(v.EnableNetworkResilience), "title":v.Title, "description":v.Description, "allow_guest_posts":fmt.Sprint(v.AllowGuestPosts), "allow_guest_replies":fmt.Sprint(v.AllowGuestReplies), "enable_resource_rendering":fmt.Sprint(v.EnableResourceRendering), "enable_search":fmt.Sprint(v.EnableSearch)}
 	for key, value := range values { if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",key,value); err != nil { return err } }
 	return tx.Commit()
 }
@@ -198,6 +203,22 @@ func (s *Store) Topics() ([]Topic,error) {
 	rows,err:=s.catalog.Query("SELECT id,name,description,created_at FROM topics ORDER BY created_at ASC"); if err!=nil{return nil,err}; defer rows.Close()
 	out:=[]Topic{}; for rows.Next(){var v Topic; if err:=rows.Scan(&v.ID,&v.Name,&v.Description,&v.CreatedAt);err!=nil{return nil,err};out=append(out,v)}
 	return out,rows.Err()
+}
+
+// DeleteTopic moves posts (including trash) to another topic before removal.
+// Without a target, only an empty topic can be removed.
+func (s *Store) DeleteTopic(id,moveTo string) error {
+ s.mu.Lock(); defer s.mu.Unlock()
+ tx,err:=s.catalog.Begin();if err!=nil{return err};defer tx.Rollback()
+ if moveTo==id{return ErrConflict}
+ if moveTo!=""{var exists int;if err=tx.QueryRow("SELECT count(*) FROM topics WHERE id=?",moveTo).Scan(&exists);err!=nil{return err};if exists==0{return ErrNotFound}}
+ var count int
+ if err=tx.QueryRow("SELECT count(*) FROM post_index WHERE topic_id=?",id).Scan(&count);err!=nil{return err}
+ if count>0&&moveTo==""{return ErrConflict}
+ if count>0{if _,err=tx.Exec("UPDATE post_index SET topic_id=? WHERE topic_id=?",moveTo,id);err!=nil{return err}}
+ result,err:=tx.Exec("DELETE FROM topics WHERE id=?",id);if err!=nil{return err}
+ affected,err:=result.RowsAffected();if err!=nil{return err};if affected==0{return ErrNotFound}
+ return tx.Commit()
 }
 
 func (s *Store) openShard(key string) (*sql.DB,error) {
