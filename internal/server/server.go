@@ -16,6 +16,7 @@ import (
 	"github.com/washsky/mygpt-test/internal/filemanager"
 	"github.com/washsky/mygpt-test/internal/forum"
  "github.com/washsky/mygpt-test/internal/ui"
+ "github.com/washsky/mygpt-test/internal/live"
 )
 
 type calculationRequest struct {
@@ -57,6 +58,8 @@ func Start(addr, version, dataDir string) error {
 	token, err := board.AdminToken(paths.Config)
 	if err != nil { return err }
 	mux := http.NewServeMux()
+ events := live.New(func() (live.Options,error) { s,err:=board.Settings();return live.Options{Realtime:s.EnableRealtime,Clipboard:s.EnableClipboard},err },token)
+ events.Register(mux)
 	filemanager.RegisterRoutes(mux, files, board, token)
 	(&forum.Handler{Store: board, Token: token}).Register(mux)
 	mux.HandleFunc("GET /calculator", func(w http.ResponseWriter, r *http.Request) {
@@ -130,8 +133,10 @@ func Start(addr, version, dataDir string) error {
 	}
 
 	server := &http.Server{
-		Handler:           sameOriginWrites(mux),
+		Handler:           sameOriginWrites(events.Wrap(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
+ IdleTimeout: 90 * time.Second,
+ MaxHeaderBytes: 1 << 20,
 	}
 	log.Printf("mygpt-test %s is ready", version)
 	log.Printf("data directory: %s", paths.Root)

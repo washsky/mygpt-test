@@ -20,6 +20,13 @@ import (
 )
 
 type Settings struct {
+ EnableQuoteReplies bool `json:"enable_quote_replies"`
+ EnableLineNumbers bool `json:"enable_line_numbers"`
+ EnableLineCopy bool `json:"enable_line_copy"`
+ EnableClipboard bool `json:"enable_clipboard"`
+ EnableRealtime bool `json:"enable_realtime"`
+ EnableNetworkResilience bool `json:"enable_network_resilience"`
+
 	Title string `json:"title"`
 	Description string `json:"description"`
 	AllowGuestPosts bool `json:"allow_guest_posts"`
@@ -149,7 +156,7 @@ func (s *Store) Settings() (Settings, error) {
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil { return v, err }
-		switch key { case "title": v.Title=value; case "description": v.Description=value; case "allow_guest_posts": v.AllowGuestPosts=value=="true"; case "allow_guest_replies": v.AllowGuestReplies=value=="true"; case "enable_resource_rendering": v.EnableResourceRendering=value=="true"; case "enable_search": v.EnableSearch=value=="true" }
+		switch key { case "enable_quote_replies": v.EnableQuoteReplies=value=="true"; case "enable_line_numbers": v.EnableLineNumbers=value=="true"; case "enable_line_copy": v.EnableLineCopy=value=="true"; case "enable_clipboard": v.EnableClipboard=value=="true"; case "enable_realtime": v.EnableRealtime=value=="true"; case "enable_network_resilience": v.EnableNetworkResilience=value=="true"; case "title": v.Title=value; case "description": v.Description=value; case "allow_guest_posts": v.AllowGuestPosts=value=="true"; case "allow_guest_replies": v.AllowGuestReplies=value=="true"; case "enable_resource_rendering": v.EnableResourceRendering=value=="true"; case "enable_search": v.EnableSearch=value=="true" }
 	}
 	return v, rows.Err()
 }
@@ -159,7 +166,7 @@ func (s *Store) SaveSettings(v Settings) error {
 	if len(v.Title)<1 || len(v.Title)>100 || len(v.Description)>500 { return fmt.Errorf("站点名称需在 1–100 字节，简介不超过 500 字节") }
 	s.mu.Lock(); defer s.mu.Unlock()
 	tx, err := s.catalog.Begin(); if err != nil { return err }; defer tx.Rollback()
-	values := map[string]string{"title":v.Title, "description":v.Description, "allow_guest_posts":fmt.Sprint(v.AllowGuestPosts), "allow_guest_replies":fmt.Sprint(v.AllowGuestReplies), "enable_resource_rendering":fmt.Sprint(v.EnableResourceRendering), "enable_search":fmt.Sprint(v.EnableSearch)}
+	values := map[string]string{"enable_quote_replies":fmt.Sprint(v.EnableQuoteReplies), "enable_line_numbers":fmt.Sprint(v.EnableLineNumbers), "enable_line_copy":fmt.Sprint(v.EnableLineCopy), "enable_clipboard":fmt.Sprint(v.EnableClipboard), "enable_realtime":fmt.Sprint(v.EnableRealtime), "enable_network_resilience":fmt.Sprint(v.EnableNetworkResilience), "title":v.Title, "description":v.Description, "allow_guest_posts":fmt.Sprint(v.AllowGuestPosts), "allow_guest_replies":fmt.Sprint(v.AllowGuestReplies), "enable_resource_rendering":fmt.Sprint(v.EnableResourceRendering), "enable_search":fmt.Sprint(v.EnableSearch)}
 	for key, value := range values { if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",key,value); err != nil { return err } }
 	return tx.Commit()
 }

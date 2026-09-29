@@ -67,3 +67,16 @@ func TestPersistenceAndAttachment(t *testing.T) {
 	if metadata.Association.ID != "" { t.Fatalf("purged post retained attachment association: %+v", metadata.Association) }
 	if _, opened, err := files.Open(file.ID); err != nil { t.Fatal(err) } else { opened.Close() }
 }
+
+func TestInteractionSettingsPersist(t *testing.T){
+ root:=t.TempDir();files,err:=filemanager.NewStore(root+"/files");if err!=nil{t.Fatal(err)}
+ store,err:=Open(root,files);if err!=nil{t.Fatal(err)}
+ settings,err:=store.Settings();if err!=nil{t.Fatal(err)}
+ if settings.EnableQuoteReplies||settings.EnableLineNumbers||settings.EnableLineCopy||settings.EnableClipboard||settings.EnableRealtime||settings.EnableNetworkResilience{t.Fatal("new features must default off")}
+ settings.EnableQuoteReplies=true;settings.EnableLineNumbers=true;settings.EnableLineCopy=true;settings.EnableClipboard=true;settings.EnableRealtime=true;settings.EnableNetworkResilience=true
+ if err:=store.SaveSettings(settings);err!=nil{t.Fatal(err)};store.Close()
+ store,err=Open(root,files);if err!=nil{t.Fatal(err)};defer store.Close()
+ got,err:=store.Settings();if err!=nil{t.Fatal(err)};if got!=settings{t.Fatalf("settings did not persist: %+v",got)}
+ got.EnableRealtime=false;got.EnableClipboard=false;if err:=store.SaveSettings(got);err!=nil{t.Fatal(err)}
+ disabled,err:=store.Settings();if err!=nil{t.Fatal(err)};if disabled.EnableRealtime||disabled.EnableClipboard||!disabled.EnableLineCopy{t.Fatal("feature switches must be independent")}
+}
