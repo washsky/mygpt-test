@@ -1,0 +1,48 @@
+name: Cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: '清理范围'
+        type: choice
+        options: [artifacts, runs, releases, all]
+        default: artifacts
+      older_than_days:
+        description: '只处理早于多少天的项目（至少 1 天）'
+        type: number
+        default: 30
+      keep_latest:
+        description: '各组至少保留最新数量（至少 1）'
+        type: number
+        default: 5
+      dry_run:
+        description: '仅预览待清理清单，不删除'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: repository-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preview or clean repository history
+        uses: actions/github-script@v7
+        env:
+          CLEANUP_SCOPE: ${{ inputs.scope }}
+          CLEANUP_DAYS: ${{ inputs.older_than_days }}
+          CLEANUP_KEEP: ${{ inputs.keep_latest }}
+          CLEANUP_DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          script: |
+            const cleanup = require('./.github/scripts/cleanup.cjs');
+            await cleanup({github, context, core});
