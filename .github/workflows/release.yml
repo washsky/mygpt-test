@@ -1,6 +1,15 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'tests/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 permissions:
@@ -30,6 +39,14 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Frontend and cleanup regression tests
+        run: node --test tests/forum.test.mjs tests/cleanup.test.cjs
 
   version:
     name: Select version
@@ -141,6 +158,10 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum mygpt-test-* > SHA256SUMS
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2

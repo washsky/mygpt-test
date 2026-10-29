@@ -71,7 +71,7 @@ mygpt-test-data/
 
 ## GitHub Actions
 
-CI 和 Release 均只在手动触发时运行。CI 在 GitHub 上解析 Go 依赖、测试和编译；Release 测试通过后将最新正式版本的补丁号加一，创建版本标签，并构建 Linux、Android、Windows、macOS 的二进制文件。SQLite 使用不依赖 CGO 的驱动；Release 的 Android 构建启用点锁支持。
+CI 支持手动触发。Release 在 main 分支的程序代码、Go 依赖、测试或发布工作流发生更新时自动触发，也保留手动运行入口；仅修改文档或 Cleanup 配置不会发布新版本。一次包含多个文件的提交只触发一次发布。Go 测试与前端、清理逻辑回归测试通过后，将已有版本标签的最大补丁号加一，创建版本标签，并构建 Linux、Android、Windows、macOS 的二进制文件。Release 附带 SHA256SUMS，便于下载后校验。SQLite 使用不依赖 CGO 的驱动；Release 的 Android 构建启用点锁支持。
 
 ## 工作空间界面
 
