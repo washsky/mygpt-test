@@ -127,11 +127,13 @@ API 更新为 `GET/POST/DELETE /api/clipboard`、`PUT/DELETE /api/clipboard/{id}
 Actions 中新增 **Cleanup**，仅支持手动触发：
 
 - `scope`：构建产物 artifacts、工作流运行 runs、旧 Release releases，或 all。
-- `older_than_days`：只处理早于指定天数的项目，默认 30 天，最小 1。
-- `keep_latest`：每组至少保留最新数量，默认 5，最小 1。产物按名称分组，运行按工作流分组，Release 按正式/预发布分组。
+- `older_than_days`：只处理早于指定天数的项目，默认 30；设为 0 则不限制时间。
+- `keep_latest`：每组至少保留最新数量，默认 5；设为 0 则不按数量保留。产物按名称分组，运行按工作流分组，Release 按正式/预发布分组。
 - `dry_run`：默认 true，只在工作流 Summary 列出清理清单；设为 false 才实际删除。
 
-运行中的工作流、当前 Cleanup、最新正式 Release、草稿 Release 会保留。删除 Release 会连同其下载资产删除，但保留 Git 标签，避免现有版本递增流程重用版本号。删除工作流运行也会删除它关联的产物，所以 all 模式中运行清理可能一并移除产物保留规则单独保留的内容。
+两个条件同时设置时，只有超出各组保留数量且早于指定天数的项目会进入清理清单。例如，想仅按数量保留每个工作流最新 1 次，选择 `runs` 并设置 `older_than_days=0`、`keep_latest=1`；想仅按时间清理，设置 `keep_latest=0`；两个值都为 0 时，清理范围内的所有可清理项目都会进入清单。
+
+运行中的工作流、当前 Cleanup 和草稿 Release 始终保留。`keep_latest=0` 时最新正式 Release 也可能被删除。删除 Release 会连同其下载资产删除，但保留 Git 标签，避免现有版本递增流程重用版本号。删除工作流运行也会删除它关联的产物，所以 all 模式中运行清理可能一并移除产物保留规则单独保留的内容。
 
 该工作流只清理 GitHub 仓库历史，不连接内网服务器，不删除论坛帖子、附件或数据库。本次没有触发实际清理；请先运行预览查看候选清单。
 

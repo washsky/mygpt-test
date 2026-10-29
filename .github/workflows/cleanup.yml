@@ -9,11 +9,11 @@ on:
         options: [artifacts, runs, releases, all]
         default: artifacts
       older_than_days:
-        description: '只处理早于多少天的项目（至少 1 天）'
+        description: '只处理早于多少天的项目；0 表示不限制时间'
         type: number
         default: 30
       keep_latest:
-        description: '各组至少保留最新数量（至少 1）'
+        description: '每组保留最新数量；0 表示不保留'
         type: number
         default: 5
       dry_run:

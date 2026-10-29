@@ -3,8 +3,8 @@ module.exports = async ({github, context, core}) => {
   const days = Number(process.env.CLEANUP_DAYS);
   const keep = Number(process.env.CLEANUP_KEEP);
   const dryRun = process.env.CLEANUP_DRY_RUN !== 'false';
-  if (!['artifacts', 'runs', 'releases', 'all'].includes(scope) || !Number.isInteger(days) || days < 1 || !Number.isInteger(keep) || keep < 1) {
-    throw new Error('清理范围无效，天数和保留数量必须为正整数。');
+  if (!['artifacts', 'runs', 'releases', 'all'].includes(scope) || !/^\d+$/.test(process.env.CLEANUP_DAYS || '') || !/^\d+$/.test(process.env.CLEANUP_KEEP || '') || !Number.isSafeInteger(days) || !Number.isSafeInteger(keep)) {
+    throw new Error('清理范围无效，天数和保留数量必须为非负整数。');
   }
   const {owner, repo} = context.repo;
   const cutoff = Date.now() - days * 86400000;
@@ -19,7 +19,7 @@ module.exports = async ({github, context, core}) => {
     const selected = [];
     for (const group of groups.values()) {
       group.sort((a,b) => Date.parse(dateOf(b)) - Date.parse(dateOf(a)));
-      selected.push(...group.slice(keep).filter(item => Date.parse(dateOf(item)) < cutoff));
+      selected.push(...group.slice(keep).filter(item => days === 0 || Date.parse(dateOf(item)) < cutoff));
     }
     return selected;
   };
@@ -33,24 +33,20 @@ module.exports = async ({github, context, core}) => {
   if (scope === 'runs' || scope === 'all') {
     const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {owner,repo,per_page:100});
     // Protect all active runs, this run, and recent completed runs in each workflow.
-    for (const item of select(runs.filter(item=>item.status==='completed'), item=>item.workflow_id, item=>item.created_at)) {
-      if (item.id === context.runId) continue;
+    for (const item of select(runs.filter(item=>item.status==='completed' && item.id !== context.runId), item=>item.workflow_id, item=>item.created_at)) {
       candidates.push({kind:'run',id:item.id,name:item.name||String(item.workflow_id),date:item.created_at,
         remove:async()=>{const current=await github.rest.actions.getWorkflowRun({owner,repo,run_id:item.id});if(current.data.status!=='completed')return false;await github.rest.actions.deleteWorkflowRun({owner,repo,run_id:item.id});return true;}});
     }
   }
   if (scope === 'releases' || scope === 'all') {
     const releases = await github.paginate(github.rest.repos.listReleases, {owner,repo,per_page:100});
-    let latestID = null;
-    try { latestID=(await github.rest.repos.getLatestRelease({owner,repo})).data.id; } catch(error) { if(error.status!==404)throw error; }
     for (const item of select(releases.filter(item=>!item.draft), item=>item.prerelease?'prerelease':'release', item=>item.published_at||item.created_at)) {
-      if (item.id===latestID) continue;
       candidates.push({kind:'release',id:item.id,name:item.tag_name,date:item.published_at||item.created_at,
         remove:()=>github.rest.repos.deleteRelease({owner,repo,release_id:item.id})});
     }
   }
   core.summary.addHeading(dryRun?'清理预览':'清理执行结果');
-  core.summary.addRaw(`范围：${scope}；早于 ${days} 天；每组保留最新 ${keep} 项。Release 清理保留 Git 标签。工作流运行删除也会删除其关联产物。\n\n`);
+  core.summary.addRaw(`范围：${scope}；${days === 0 ? '不限制时间' : '早于 ' + days + ' 天'}；每组保留最新 ${keep} 项。Release 清理保留 Git 标签。工作流运行删除也会删除其关联产物。\n\n`);
   const rows = [[{data:'类型',header:true},{data:'ID',header:true},{data:'名称',header:true},{data:'创建/发布时间',header:true},{data:'结果',header:true}]];
   let failed=0;
   for (const item of candidates) {
