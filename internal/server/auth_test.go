@@ -31,16 +31,16 @@ func TestAccountsAndGuestPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer board.Close()
-	accounts, err := auth.Open(root, "owner-secret", func() (bool, error) { v, e := board.Settings(); return v.AllowRegistration, e })
+	accounts, err := auth.Open(root, func() (bool, error) { v, e := board.Settings(); return v.AllowRegistration, e })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer accounts.Close()
 	mux := http.NewServeMux()
 	accounts.Register(mux)
-	(&forum.Handler{Store: board, Token: "owner-secret"}).Register(mux)
-	filemanager.RegisterRoutes(mux, files, board, "owner-secret")
-	handler := sameOriginWrites(accounts.Wrap(guestPermissions(board, "owner-secret", mux)))
+	(&forum.Handler{Store: board, Accounts: accounts}).Register(mux)
+	filemanager.RegisterRoutes(mux, files, board)
+	handler := sameOriginWrites(accounts.Wrap(guestPermissions(board, mux)))
 	sequence := 0
 	request := func(method, path, body string, session testSession, token string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -80,9 +80,16 @@ func TestAccountsAndGuestPermissions(t *testing.T) {
 		}
 		return testSession{cookies[0], data.CSRF}
 	}
-	check(request("POST", "/api/auth/setup", `{"username":"owner","password":"correct horse battery"}`, testSession{}, ""), 403)
-	check(request("POST", "/api/auth/setup", `{"username":"owner","password":"correct horse battery"}`, testSession{}, "owner-secret"), 201)
-	check(request("POST", "/api/auth/setup", `{"username":"hijacker","password":"correct horse battery"}`, testSession{}, "owner-secret"), 409)
+	check(request("POST", "/api/auth/setup", `{"username":"hijacker","password":"correct horse battery"}`, testSession{}, "owner-secret"), 404)
+	wFirst := request("POST", "/api/auth/register", `{"username":"owner","password":"correct horse battery"}`, testSession{}, "")
+	check(wFirst, 201)
+	var first struct {
+		User auth.User `json:"user"`
+	}
+	json.Unmarshal(wFirst.Body.Bytes(), &first)
+	if first.User.Role != "admin" || first.User.UID != 1 {
+		t.Fatalf("first registration: %+v", first.User)
+	}
 	for _, name := range []string{"alice", "bob"} {
 		check(request("POST", "/api/auth/register", `{"username":"`+name+`","password":"correct horse battery"}`, testSession{}, ""), 201)
 	}
@@ -91,6 +98,8 @@ func TestAccountsAndGuestPermissions(t *testing.T) {
 	alice, bob, admin := login("alice"), login("bob"), login("owner")
 	check(request("GET", "/api/auth/users", "", alice, ""), 403)
 	check(request("GET", "/api/auth/users", "", admin, ""), 200)
+	check(request("GET", "/api/auth/users", "", testSession{}, "owner-secret"), 403)
+	check(request("PUT", "/api/forum/settings", `{}`, testSession{}, "owner-secret"), 403)
 	// No CSRF token and a forged token must both fail with a valid cookie.
 	check(request("POST", "/api/auth/logout", "{}", testSession{alice.cookie, ""}, ""), 403)
 	check(request("POST", "/api/auth/logout", "{}", testSession{alice.cookie, "forged"}, ""), 403)
@@ -101,17 +110,17 @@ func TestAccountsAndGuestPermissions(t *testing.T) {
 	check(w, 201)
 	var post forum.Post
 	json.Unmarshal(w.Body.Bytes(), &post)
-	if post.UserID == "" || post.Author != "alice" {
+	if post.UserID == "" || post.Author != "alice" || post.UserUID != 2 {
 		t.Fatalf("untrusted author: %+v", post)
 	}
 	w = request("GET", "/api/forum/posts/"+post.ID, "", testSession{}, "")
 	check(w, 200)
-	if !strings.Contains(w.Body.String(), post.UserID) {
+	if !strings.Contains(w.Body.String(), post.UserID) || !strings.Contains(w.Body.String(), `"user_uid":2`) {
 		t.Fatal("lost persistent authorship")
 	}
 	w = request("GET", "/api/forum/posts", "", testSession{}, "")
 	check(w, 200)
-	if !strings.Contains(w.Body.String(), post.UserID) {
+	if !strings.Contains(w.Body.String(), post.UserID) || !strings.Contains(w.Body.String(), `"user_uid":2`) {
 		t.Fatal("list lost authorship")
 	}
 	check(request("PUT", "/api/forum/posts/"+post.ID, `{"title":"changed","body":"owned"}`, bob, ""), 403)
@@ -121,7 +130,7 @@ func TestAccountsAndGuestPermissions(t *testing.T) {
 	check(w, 201)
 	var reply forum.Reply
 	json.Unmarshal(w.Body.Bytes(), &reply)
-	if reply.UserID != post.UserID || reply.Author != "alice" {
+	if reply.UserID != post.UserID || reply.Author != "alice" || reply.UserUID != 2 {
 		t.Fatal("reply identity forged")
 	}
 	check(request("PUT", "/api/forum/replies/"+reply.ID, `{"body":"edited"}`, bob, ""), 403)

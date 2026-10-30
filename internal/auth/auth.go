@@ -29,6 +29,7 @@ const cookieName = "mygpt_session"
 const sessionTTL = 7 * 24 * time.Hour
 
 type User struct {
+	UID      int64  `json:"uid"`
 	ID       string `json:"id"`
 	Username string `json:"username"`
 	Role     string `json:"role"`
@@ -44,13 +45,8 @@ func Current(r *http.Request) *User {
 	v, _ := r.Context().Value(contextKey{}).(identity)
 	return v.User
 }
-func IsAdmin(r *http.Request, token string) bool {
-	if u := Current(r); u != nil && u.Role == "admin" {
-		return true
-	}
-	value := r.Header.Get("X-Admin-Token")
-	return token != "" && len(value) == len(token) && subtle.ConstantTimeCompare([]byte(value), []byte(token)) == 1
-}
+func IsAdmin(r *http.Request) bool { user := Current(r); return user != nil && user.Role == "admin" }
+
 func random() (string, error) {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
@@ -64,7 +60,6 @@ type window struct {
 }
 type Service struct {
 	db           *sql.DB
-	token        string
 	registration func() (bool, error)
 	secure       bool
 	dummy        []byte
@@ -73,7 +68,7 @@ type Service struct {
 	workers      chan struct{}
 }
 
-func Open(dir, token string, registration func() (bool, error)) (*Service, error) {
+func Open(dir string, registration func() (bool, error)) (*Service, error) {
 	path := filepath.Join(dir, "accounts.sqlite")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -93,18 +88,37 @@ func Open(dir, token string, registration func() (bool, error)) (*Service, error
 		"CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT NOT NULL UNIQUE,password TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('member','admin')),disabled INTEGER NOT NULL DEFAULT 0)",
 		"CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),csrf TEXT NOT NULL,expires INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS sessions_by_user ON sessions(user_id)",
+		"CREATE TABLE IF NOT EXISTS user_uids(uid INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL UNIQUE REFERENCES users(id))",
 	} {
 		if _, err = db.Exec(q); err != nil {
 			db.Close()
 			return nil, err
 		}
 	}
+	// Keep the original account IDs and sessions intact while assigning public UIDs.
+	tx, err := db.Begin()
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = tx.Exec("INSERT INTO user_uids(user_id) SELECT id FROM users WHERE id NOT IN (SELECT user_id FROM user_uids) ORDER BY rowid"); err == nil {
+		_, err = tx.Exec("UPDATE users SET role='admin' WHERE id=(SELECT user_id FROM user_uids ORDER BY uid LIMIT 1) AND NOT EXISTS(SELECT 1 FROM users WHERE role='admin')")
+	}
+	if err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	dummy, err := bcrypt.GenerateFromPassword([]byte("unavailable-account-password"), bcrypt.DefaultCost)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Service{db: db, token: token, registration: registration, secure: os.Getenv("MYGPT_SECURE_COOKIE") == "1", dummy: dummy, attempts: map[string]window{}, workers: make(chan struct{}, 4)}, nil
+	return &Service{db: db, registration: registration, secure: os.Getenv("MYGPT_SECURE_COOKIE") == "1", dummy: dummy, attempts: map[string]window{}, workers: make(chan struct{}, 4)}, nil
 }
 func (s *Service) Close() error { return s.db.Close() }
 
@@ -121,7 +135,7 @@ func (s *Service) Wrap(next http.Handler) http.Handler {
 		if err == nil {
 			var u User
 			var csrf string
-			err = s.db.QueryRow("SELECT u.id,u.username,u.role,u.disabled,s.csrf FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires>? AND u.disabled=0", digest(cookie.Value), time.Now().Unix()).Scan(&u.ID, &u.Username, &u.Role, &u.Disabled, &csrf)
+			err = s.db.QueryRow("SELECT u.id,u.username,u.role,u.disabled,s.csrf,n.uid FROM sessions s JOIN users u ON u.id=s.user_id JOIN user_uids n ON n.user_id=u.id WHERE s.hash=? AND s.expires>? AND u.disabled=0", digest(cookie.Value), time.Now().Unix()).Scan(&u.ID, &u.Username, &u.Role, &u.Disabled, &csrf, &u.UID)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				http.Error(w, "身份验证暂时不可用", 503)
 				return
@@ -134,7 +148,7 @@ func (s *Service) Wrap(next http.Handler) http.Handler {
 				r = r.WithContext(context.WithValue(r.Context(), contextKey{}, identity{&u, csrf}))
 			} else {
 				s.clearCookie(w, r)
-				if r.Method != "GET" && r.Method != "HEAD" && r.URL.Path != "/api/auth/login" && r.URL.Path != "/api/auth/register" && r.URL.Path != "/api/auth/setup" && r.URL.Path != "/api/auth/logout" {
+				if r.Method != "GET" && r.Method != "HEAD" && r.URL.Path != "/api/auth/login" && r.URL.Path != "/api/auth/register" && r.URL.Path != "/api/auth/logout" {
 					http.Error(w, "登录已过期，请重新登录或刷新后以访客继续", 401)
 					return
 				}
@@ -147,7 +161,6 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /account", s.page)
 	mux.HandleFunc("GET /api/auth/me", s.me)
 	mux.HandleFunc("POST /api/auth/register", s.limited(s.register))
-	mux.HandleFunc("POST /api/auth/setup", s.limited(s.setup))
 	mux.HandleFunc("POST /api/auth/login", s.limited(s.login))
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("POST /api/auth/password", s.limited(s.password))
@@ -236,14 +249,19 @@ func (s *Service) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var count int
-	if err = s.db.QueryRow("SELECT count(*) FROM users WHERE role='admin'").Scan(&count); err != nil {
+	if err = s.db.QueryRow("SELECT count(*) FROM users").Scan(&count); err != nil {
 		http.Error(w, "无法读取账户设置", 500)
 		return
 	}
 	id, _ := r.Context().Value(contextKey{}).(identity)
-	reply(w, 200, map[string]any{"user": id.User, "csrf_token": id.CSRF, "allow_registration": enabled, "setup_required": count == 0})
+	reply(w, 200, map[string]any{"user": id.User, "csrf_token": id.CSRF, "allow_registration": enabled || count == 0, "first_registration": count == 0})
 }
-func (s *Service) create(w http.ResponseWriter, r *http.Request, role string) {
+func (s *Service) register(w http.ResponseWriter, r *http.Request) {
+	enabled, err := s.registration()
+	if err != nil {
+		http.Error(w, "无法读取账户设置", 500)
+		return
+	}
 	var c credentials
 	if !input(w, r, &c) {
 		return
@@ -269,16 +287,18 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request, role string) {
 		return
 	}
 	defer tx.Rollback()
-	if role == "admin" {
-		var n int
-		if err = tx.QueryRow("SELECT count(*) FROM users WHERE role='admin'").Scan(&n); err != nil {
-			http.Error(w, "无法检查管理员", 500)
-			return
-		}
-		if n != 0 {
-			http.Error(w, "管理员账户已初始化", 409)
-			return
-		}
+	var total int
+	if err = tx.QueryRow("SELECT count(*) FROM users").Scan(&total); err != nil {
+		http.Error(w, "无法读取账户设置", 500)
+		return
+	}
+	if total > 0 && !enabled {
+		http.Error(w, "本站已关闭注册，仍可按站点设置以访客使用", 403)
+		return
+	}
+	role := "member"
+	if total == 0 {
+		role = "admin"
 	}
 	var n int
 	if err = tx.QueryRow("SELECT count(*) FROM users WHERE username=?", c.Username).Scan(&n); err != nil {
@@ -294,30 +314,25 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request, role string) {
 		http.Error(w, "无法创建账户", 500)
 		return
 	}
+	result, err := tx.Exec("INSERT INTO user_uids(user_id) VALUES(?)", id)
+	if err != nil {
+		http.Error(w, "无法分配 UID", 500)
+		return
+	}
+	uid, err := result.LastInsertId()
+	if err != nil {
+		http.Error(w, "无法分配 UID", 500)
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		http.Error(w, "无法创建账户", 500)
 		return
 	}
-	reply(w, 201, map[string]string{"message": "账户已创建，请登录"})
-}
-func (s *Service) register(w http.ResponseWriter, r *http.Request) {
-	enabled, err := s.registration()
-	if err != nil {
-		http.Error(w, "无法读取账户设置", 500)
-		return
+	message := "账户已创建，请登录"
+	if role == "admin" {
+		message = "首个管理员账户已创建，请登录"
 	}
-	if !enabled {
-		http.Error(w, "本站已关闭注册，仍可按站点设置以访客使用", 403)
-		return
-	}
-	s.create(w, r, "member")
-}
-func (s *Service) setup(w http.ResponseWriter, r *http.Request) {
-	if !IsAdmin(r, s.token) {
-		http.Error(w, "创建首个管理员需要数据目录中的管理员令牌", 403)
-		return
-	}
-	s.create(w, r, "admin")
+	reply(w, 201, map[string]any{"message": message, "user": User{ID: id, Username: c.Username, Role: role, UID: uid}})
 }
 func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	var c credentials
@@ -327,7 +342,7 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	c.Username = strings.ToLower(strings.TrimSpace(c.Username))
 	var u User
 	var hash string
-	err := s.db.QueryRow("SELECT id,username,role,disabled,password FROM users WHERE username=?", c.Username).Scan(&u.ID, &u.Username, &u.Role, &u.Disabled, &hash)
+	err := s.db.QueryRow("SELECT u.id,u.username,u.role,u.disabled,u.password,n.uid FROM users u JOIN user_uids n ON n.user_id=u.id WHERE u.username=?", c.Username).Scan(&u.ID, &u.Username, &u.Role, &u.Disabled, &hash, &u.UID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "登录暂时不可用", 503)
 		return
@@ -461,11 +476,11 @@ func (s *Service) password(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 func (s *Service) users(w http.ResponseWriter, r *http.Request) {
-	if !IsAdmin(r, s.token) {
+	if !IsAdmin(r) {
 		http.Error(w, "需要管理员身份", 403)
 		return
 	}
-	rows, err := s.db.Query("SELECT id,username,role,disabled FROM users ORDER BY username")
+	rows, err := s.db.Query("SELECT u.id,u.username,u.role,u.disabled,n.uid FROM users u JOIN user_uids n ON n.user_id=u.id ORDER BY n.uid")
 	if err != nil {
 		http.Error(w, "无法读取用户", 500)
 		return
@@ -474,7 +489,7 @@ func (s *Service) users(w http.ResponseWriter, r *http.Request) {
 	items := []User{}
 	for rows.Next() {
 		var u User
-		if err = rows.Scan(&u.ID, &u.Username, &u.Role, &u.Disabled); err != nil {
+		if err = rows.Scan(&u.ID, &u.Username, &u.Role, &u.Disabled, &u.UID); err != nil {
 			http.Error(w, "无法读取用户", 500)
 			return
 		}
@@ -487,7 +502,7 @@ func (s *Service) users(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, map[string]any{"items": items})
 }
 func (s *Service) disable(w http.ResponseWriter, r *http.Request) {
-	if !IsAdmin(r, s.token) {
+	if !IsAdmin(r) {
 		http.Error(w, "需要管理员身份", 403)
 		return
 	}
@@ -522,4 +537,11 @@ func (s *Service) disable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+// UID resolves the public registration sequence without changing content ownership.
+func (s *Service) UID(id string) (int64, error) {
+	var uid int64
+	err := s.db.QueryRow("SELECT uid FROM user_uids WHERE user_id=?", id).Scan(&uid)
+	return uid, err
 }

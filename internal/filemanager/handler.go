@@ -22,7 +22,6 @@ const maxRequestSize = MaxUploadSize + (1 << 20)
 type apiHandler struct {
 	store Store
 	links Linker
-	token string
 }
 
 type Linker interface {
@@ -30,8 +29,8 @@ type Linker interface {
 	Detach(fileID string) error
 }
 
-func RegisterRoutes(mux *http.ServeMux, store Store, links Linker, token string) {
-	handler := &apiHandler{store: store, links: links, token: token}
+func RegisterRoutes(mux *http.ServeMux, store Store, links Linker) {
+	handler := &apiHandler{store: store, links: links}
 	mux.HandleFunc("GET /api/files", handler.list)
 	mux.HandleFunc("GET /api/files/trash", handler.trash)
 	mux.HandleFunc("DELETE /api/files/trash", handler.emptyTrash)
@@ -56,8 +55,8 @@ func RegisterRoutes(mux *http.ServeMux, store Store, links Linker, token string)
 }
 
 func (h *apiHandler) admin(w http.ResponseWriter, r *http.Request) bool {
-	if !auth.IsAdmin(r,h.token) {
-		http.Error(w, "admin token required (see data/config/admin-token)", http.StatusForbidden)
+	if !auth.IsAdmin(r) {
+		http.Error(w, "需要管理员登录", http.StatusForbidden)
 		return false
 	}
 	return true
@@ -147,7 +146,7 @@ func (h *apiHandler) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
- if association.Type!=""&&!auth.IsAdmin(r,h.token) {
+ if association.Type!=""&&!auth.IsAdmin(r) {
   if owners,ok:=h.links.(interface{AuthorID(string,string)(string,error)});ok {
    owner,err:=owners.AuthorID(association.Type,association.ID);if err!=nil{http.Error(w,"关联内容不存在",400);return}
    user:=auth.Current(r);if owner!=""&&(user==nil||user.ID!=owner){http.Error(w,"只能为自己的账户内容添加附件",403);return}

@@ -13,7 +13,7 @@ import (
 
 type Handler struct {
 	Store *Store
-	Token string
+ Accounts *auth.Service
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -50,7 +50,7 @@ func decode(w http.ResponseWriter,r *http.Request,out any) bool {
 	return true
 }
 func (h *Handler) admin(w http.ResponseWriter,r *http.Request) bool {
- if !auth.IsAdmin(r,h.Token){http.Error(w,"需要管理员身份",http.StatusForbidden);return false};return true
+ if !auth.IsAdmin(r){http.Error(w,"需要管理员身份",http.StatusForbidden);return false};return true
 }
 func (h *Handler) page(w http.ResponseWriter,r *http.Request){if r.URL.Path!="/"{http.NotFound(w,r);return};if r.Method!=http.MethodGet{w.Header().Set("Allow",http.MethodGet);http.Error(w,"method not allowed",http.StatusMethodNotAllowed);return};w.Header().Set("Content-Type","text/html; charset=utf-8");w.Header().Set("Content-Security-Policy","default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; object-src 'none'; base-uri 'none'");_,_=io.WriteString(w,forumPage)}
 func (h *Handler) settings(w http.ResponseWriter,r *http.Request){v,err:=h.Store.Settings();if err!=nil{fail(w,err);return};respond(w,200,v)}
@@ -58,9 +58,9 @@ func (h *Handler) saveSettings(w http.ResponseWriter,r *http.Request){if !h.admi
 func (h *Handler) topics(w http.ResponseWriter,r *http.Request){v,err:=h.Store.Topics();if err!=nil{fail(w,err);return};respond(w,200,map[string]any{"items":v})}
 func (h *Handler) createTopic(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};var in struct{Name string `json:"name"`;Description string `json:"description"`};if !decode(w,r,&in){return};v,err:=h.Store.CreateTopic(in.Name,in.Description);if err!=nil{http.Error(w,err.Error(),400);return};respond(w,201,v)}
 func (h *Handler) deleteTopic(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};err:=h.Store.DeleteTopic(r.PathValue("id"),r.URL.Query().Get("move_to"));if errors.Is(err,ErrConflict){http.Error(w,"该主题仍有帖子或回收站记录，请选择其他主题接收内容。",http.StatusConflict);return};if errors.Is(err,ErrNotFound){fail(w,err);return};if err!=nil{fail(w,err);return};w.WriteHeader(http.StatusNoContent)}
-func (h *Handler) posts(w http.ResponseWriter,r *http.Request){limit,_:=strconv.Atoi(r.URL.Query().Get("limit"));offset,_:=strconv.Atoi(r.URL.Query().Get("offset"));topicID:=r.URL.Query().Get("topic_id");query:=r.URL.Query().Get("q");var v []Post;var err error;if query!=""{if len(query)>200{http.Error(w,"search query is too long",http.StatusBadRequest);return};settings,settingsErr:=h.Store.Settings();if settingsErr!=nil{fail(w,settingsErr);return};if !settings.EnableSearch{http.Error(w,"search is disabled in settings",http.StatusForbidden);return};v,err=h.Store.SearchPosts(query,topicID,limit,offset)}else{v,err=h.Store.Posts(topicID,limit,offset)};if err!=nil{fail(w,err);return};respond(w,200,map[string]any{"items":v})}
-func (h *Handler) createPost(w http.ResponseWriter,r *http.Request){settings,err:=h.Store.Settings();if err!=nil{fail(w,err);return};if !settings.AllowGuestPosts&&auth.Current(r)==nil&&!h.admin(w,r){return};var in struct{TopicID string `json:"topic_id"`;Title string `json:"title"`;Body string `json:"body"`;Author string `json:"author"`;Timezone string `json:"timezone"`};if !decode(w,r,&in){return};client:=selectedClientInfo(settings,r,in.Timezone);userID:="";if user:=auth.Current(r);user!=nil{userID=user.ID;in.Author=user.Username};v,err:=h.Store.CreatePostForUser(in.TopicID,in.Title,in.Body,in.Author,userID,client);if errors.Is(err,ErrNotFound){fail(w,err);return};if err!=nil{http.Error(w,err.Error(),400);return};respond(w,201,v)}
-func (h *Handler) post(w http.ResponseWriter,r *http.Request){v,err:=h.Store.Post(r.PathValue("id"));if err!=nil{fail(w,err);return};respond(w,200,v)}
+func (h *Handler) posts(w http.ResponseWriter,r *http.Request){limit,_:=strconv.Atoi(r.URL.Query().Get("limit"));offset,_:=strconv.Atoi(r.URL.Query().Get("offset"));topicID:=r.URL.Query().Get("topic_id");query:=r.URL.Query().Get("q");var v []Post;var err error;if query!=""{if len(query)>200{http.Error(w,"search query is too long",http.StatusBadRequest);return};settings,settingsErr:=h.Store.Settings();if settingsErr!=nil{fail(w,settingsErr);return};if !settings.EnableSearch{http.Error(w,"search is disabled in settings",http.StatusForbidden);return};v,err=h.Store.SearchPosts(query,topicID,limit,offset)}else{v,err=h.Store.Posts(topicID,limit,offset)};if err!=nil{fail(w,err);return};for i:=range v{if err=h.identify(&v[i]);err!=nil{fail(w,err);return}};respond(w,200,map[string]any{"items":v})}
+func (h *Handler) createPost(w http.ResponseWriter,r *http.Request){settings,err:=h.Store.Settings();if err!=nil{fail(w,err);return};if !settings.AllowGuestPosts&&auth.Current(r)==nil&&!h.admin(w,r){return};var in struct{TopicID string `json:"topic_id"`;Title string `json:"title"`;Body string `json:"body"`;Author string `json:"author"`;Timezone string `json:"timezone"`};if !decode(w,r,&in){return};client:=selectedClientInfo(settings,r,in.Timezone);uid:=int64(0);if user:=auth.Current(r);user!=nil{uid=user.UID};userID:="";if user:=auth.Current(r);user!=nil{userID=user.ID;in.Author=user.Username};v,err:=h.Store.CreatePostForUser(in.TopicID,in.Title,in.Body,in.Author,userID,client);if errors.Is(err,ErrNotFound){fail(w,err);return};if err!=nil{http.Error(w,err.Error(),400);return};v.UserUID=uid;respond(w,201,v)}
+func (h *Handler) post(w http.ResponseWriter,r *http.Request){v,err:=h.Store.Post(r.PathValue("id"));if err==nil{err=h.identify(&v)};if err!=nil{fail(w,err);return};respond(w,200,v)}
 func (h *Handler) trash(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};posts,err:=h.Store.TrashPosts();if err!=nil{fail(w,err);return};replies,err:=h.Store.TrashReplies();if err!=nil{fail(w,err);return};respond(w,200,map[string]any{"posts":posts,"replies":replies})}
 func (h *Handler) emptyTrash(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};if err:=h.Store.EmptyTrash();err!=nil{fail(w,err);return};w.WriteHeader(http.StatusNoContent)}
 func (h *Handler) restorePost(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};if err:=h.Store.RestorePost(r.PathValue("id"));err!=nil{fail(w,err);return};w.WriteHeader(http.StatusNoContent)}
@@ -69,7 +69,7 @@ func (h *Handler) restoreReply(w http.ResponseWriter,r *http.Request){if !h.admi
 func (h *Handler) purgeReply(w http.ResponseWriter,r *http.Request){if !h.admin(w,r){return};if err:=h.Store.PurgeReply(r.PathValue("id"));err!=nil{fail(w,err);return};w.WriteHeader(http.StatusNoContent)}
 func (h *Handler) updatePost(w http.ResponseWriter,r *http.Request){if !h.manage(w,r,"post"){return};var in struct{Title string `json:"title"`;Body string `json:"body"`};if !decode(w,r,&in){return};if err:=h.Store.UpdatePost(r.PathValue("id"),in.Title,in.Body);err!=nil{if errors.Is(err,ErrNotFound){fail(w,err)}else{http.Error(w,err.Error(),400)};return};w.WriteHeader(http.StatusNoContent)}
 func (h *Handler) deletePost(w http.ResponseWriter,r *http.Request){if !h.manage(w,r,"post"){return};if err:=h.Store.DeletePost(r.PathValue("id"));err!=nil{if errors.Is(err,ErrNotFound){fail(w,err)}else{http.Error(w,err.Error(),500)};return};w.WriteHeader(http.StatusNoContent)}
-func (h *Handler) createReply(w http.ResponseWriter,r *http.Request){settings,err:=h.Store.Settings();if err!=nil{fail(w,err);return};if !settings.AllowGuestReplies&&auth.Current(r)==nil&&!h.admin(w,r){return};var in struct{Body string `json:"body"`;Author string `json:"author"`;Timezone string `json:"timezone"`};if !decode(w,r,&in){return};client:=selectedClientInfo(settings,r,in.Timezone);userID:="";if user:=auth.Current(r);user!=nil{userID=user.ID;in.Author=user.Username};v,err:=h.Store.CreateReplyForUser(r.PathValue("id"),in.Body,in.Author,userID,client);if errors.Is(err,ErrNotFound){fail(w,err);return};if err!=nil{http.Error(w,err.Error(),400);return};respond(w,201,v)}
+func (h *Handler) createReply(w http.ResponseWriter,r *http.Request){settings,err:=h.Store.Settings();if err!=nil{fail(w,err);return};if !settings.AllowGuestReplies&&auth.Current(r)==nil&&!h.admin(w,r){return};var in struct{Body string `json:"body"`;Author string `json:"author"`;Timezone string `json:"timezone"`};if !decode(w,r,&in){return};client:=selectedClientInfo(settings,r,in.Timezone);uid:=int64(0);if user:=auth.Current(r);user!=nil{uid=user.UID};userID:="";if user:=auth.Current(r);user!=nil{userID=user.ID;in.Author=user.Username};v,err:=h.Store.CreateReplyForUser(r.PathValue("id"),in.Body,in.Author,userID,client);if errors.Is(err,ErrNotFound){fail(w,err);return};if err!=nil{http.Error(w,err.Error(),400);return};v.UserUID=uid;respond(w,201,v)}
 
 func selectedClientInfo(settings Settings,r *http.Request,timezone string) ClientInfo {
  if !settings.EnableClientInfo{return ClientInfo{}}
@@ -105,7 +105,13 @@ func clientInfo(r *http.Request, timezone string) ClientInfo {
 }
 
 func(h *Handler) manage(w http.ResponseWriter,r *http.Request,kind string)bool {
- if auth.IsAdmin(r,h.Token){return true}
+ if auth.IsAdmin(r){return true}
  if user:=auth.Current(r);user!=nil{owner,err:=h.Store.AuthorID(kind,r.PathValue("id"));if err!=nil{fail(w,err);return false};if owner==user.ID{return true}}
  http.Error(w,"只能管理自己的内容，或以管理员身份操作",http.StatusForbidden);return false
+}
+
+func(h *Handler) identify(post *Post) error {
+ if h.Accounts==nil{return nil};var err error
+ if post.UserID!=""{post.UserUID,err=h.Accounts.UID(post.UserID);if err!=nil{return err}}
+ for i:=range post.Replies{reply:=&post.Replies[i];if reply.UserID!=""{reply.UserUID,err=h.Accounts.UID(reply.UserID);if err!=nil{return err}}};return nil
 }

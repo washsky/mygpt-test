@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -62,6 +61,7 @@ type ClientInfo struct {
 }
 
 type Post struct {
+ UserUID int64 `json:"user_uid,omitempty"`
  UserID string `json:"user_id,omitempty"`
  ClientInfo ClientInfo `json:"client_info"`
 	ID string `json:"id"`
@@ -77,6 +77,7 @@ type Post struct {
 }
 
 type Reply struct {
+ UserUID int64 `json:"user_uid,omitempty"`
  UserID string `json:"user_id,omitempty"`
  ClientInfo ClientInfo `json:"client_info"`
 	ID string `json:"id"`
@@ -643,13 +644,6 @@ func (s *Store) Attach(fileID, kind, id string) error {
 }
 func (s *Store) Detach(fileID string) error {
 	_,err:=s.catalog.Exec("DELETE FROM file_links WHERE file_id=?",fileID);return err
-}
-
-func (s *Store) AdminToken(configDir string) (string,error) {
-	path:=filepath.Join(configDir,"admin-token")
-	data,err:=os.ReadFile(path)
-	if errors.Is(err,os.ErrNotExist){token,err:=newID();if err!=nil{return "",err};file,err:=os.OpenFile(path,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if errors.Is(err,os.ErrExist){return s.AdminToken(configDir)};if err!=nil{return "",err};_,err=file.WriteString(token+"\n");closeErr:=file.Close();if err!=nil{return "",err};if closeErr!=nil{return "",closeErr};return token,nil}
-	if err!=nil{return "",err};token:=strings.TrimSpace(string(data));if len(token)!=32{return "",fmt.Errorf("invalid admin token in %s",path)};return token,nil
 }
 
 // ReplyPostID resolves a reply only when both it and its parent are live.

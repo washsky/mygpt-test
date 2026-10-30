@@ -11,7 +11,7 @@ import (
 func TestPersistentSessionExpiryAndRateLimit(t *testing.T) {
 	dir := t.TempDir()
 	open := func() *Service {
-		s, e := Open(dir, "secret", func() (bool, error) { return true, nil })
+		s, e := Open(dir, func() (bool, error) { return true, nil })
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -19,6 +19,7 @@ func TestPersistentSessionExpiryAndRateLimit(t *testing.T) {
 	}
 	s := open()
 	s.db.Exec("INSERT INTO users(id,username,password,role) VALUES('user','tester','hash','member')")
+	s.db.Exec("INSERT INTO user_uids(user_id) VALUES('user')")
 	raw, csrf, err := s.newSession("user", "hash")
 	if err != nil {
 		t.Fatal(err)

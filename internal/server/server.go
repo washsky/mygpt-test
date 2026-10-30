@@ -57,17 +57,15 @@ func Start(addr, version, dataDir string) error {
 	board, err := forum.Open(paths.Database, files)
 	if err != nil { return err }
 	defer board.Close()
-	token, err := board.AdminToken(paths.Config)
-	if err != nil { return err }
-	accounts,err:=auth.Open(paths.Database,token,func()(bool,error){settings,err:=board.Settings();return settings.AllowRegistration,err});if err!=nil{return err};defer accounts.Close()
+	accounts,err:=auth.Open(paths.Database,func()(bool,error){settings,err:=board.Settings();return settings.AllowRegistration,err});if err!=nil{return err};defer accounts.Close()
  mux := http.NewServeMux()
  accounts.Register(mux)
  events,err := live.New(func() (live.Options,error) { s,err:=board.Settings();return live.Options{Realtime:s.EnableRealtime,Clipboard:s.EnableClipboard,ClipboardTTLMinutes:s.ClipboardTTLMinutes},err },paths.Database,files)
  if err!=nil{return err}
  defer events.Close()
  events.Register(mux)
-	filemanager.RegisterRoutes(mux, files, board, token)
-	(&forum.Handler{Store: board, Token: token}).Register(mux)
+	filemanager.RegisterRoutes(mux, files, board)
+	(&forum.Handler{Store: board, Accounts:accounts}).Register(mux)
 	mux.HandleFunc("GET /calculator", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprint(w, page)
@@ -139,7 +137,7 @@ func Start(addr, version, dataDir string) error {
 	}
 
 	server := &http.Server{
-		Handler:           sameOriginWrites(accounts.Wrap(guestPermissions(board,token,events.Wrap(mux)))),
+		Handler:           sameOriginWrites(accounts.Wrap(guestPermissions(board,events.Wrap(mux)))),
 		ReadHeaderTimeout: 5 * time.Second,
  IdleTimeout: 90 * time.Second,
  MaxHeaderBytes: 1 << 20,
@@ -147,7 +145,6 @@ func Start(addr, version, dataDir string) error {
 	log.Printf("mygpt-test %s is ready", version)
 	log.Printf("data directory: %s", paths.Root)
 	log.Printf("file manager: http://%s/files", actualAddr)
-	log.Printf("forum admin token file: %s/config/admin-token", paths.Root)
 	log.Printf("Open in your browser: http://%s", actualAddr)
 	log.Printf("API endpoint: http://%s/api/calculate", actualAddr)
 	err = server.Serve(listener)
@@ -174,9 +171,9 @@ func sameOriginWrites(next http.Handler) http.Handler {
 }
 
 // Browsing and the calculator stay public. Guest collaboration is configurable.
-func guestPermissions(board *forum.Store,token string,next http.Handler)http.Handler {
+func guestPermissions(board *forum.Store,next http.Handler)http.Handler {
  return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-  if auth.Current(r)==nil&&!auth.IsAdmin(r,token)&&(r.URL.Path=="/api/files"&&r.Method=="POST"||strings.HasPrefix(r.URL.Path,"/api/clipboard")) {
+  if auth.Current(r)==nil&&!auth.IsAdmin(r)&&(r.URL.Path=="/api/files"&&r.Method=="POST"||strings.HasPrefix(r.URL.Path,"/api/clipboard")) {
    settings,err:=board.Settings();if err!=nil{http.Error(w,"无法读取权限设置",500);return}
    if r.URL.Path=="/api/files"&&!settings.AllowGuestUploads||strings.HasPrefix(r.URL.Path,"/api/clipboard")&&!settings.AllowGuestClipboard {http.Error(w,"此功能需要登录",401);return}
   }
