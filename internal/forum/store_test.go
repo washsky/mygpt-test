@@ -83,6 +83,34 @@ func TestInteractionSettingsPersist(t *testing.T){
  disabled,err:=store.Settings();if err!=nil{t.Fatal(err)};if disabled.EnableRealtime||disabled.EnableClipboard||!disabled.EnableLineCopy{t.Fatal("feature switches must be independent")}
 }
 
+func TestAppearanceSettingsPersistIndependently(t *testing.T) {
+	root := t.TempDir()
+	files, err := filemanager.NewStore(root + "/files")
+	if err != nil { t.Fatal(err) }
+	store, err := Open(root, files)
+	if err != nil { t.Fatal(err) }
+	defer func() { if store != nil { store.Close() } }()
+	settings, err := store.Settings()
+	if err != nil { t.Fatal(err) }
+	if !settings.EnableListAvatars || settings.EnableBodyBubble { t.Fatalf("unexpected appearance defaults: %+v", settings) }
+	settings.EnableLineNumbers = true
+	settings.EnableLineCopy = true
+	settings.EnableQuoteReplies = true
+	settings.EnableResourceRendering = true
+	settings.EnableClipboard = true
+	settings.EnableRealtime = true
+	for _, combination := range [][2]bool{{false, true}, {true, true}, {false, false}, {true, false}} {
+		settings.EnableListAvatars, settings.EnableBodyBubble = combination[0], combination[1]
+		if err := store.SaveSettings(settings); err != nil { t.Fatal(err) }
+		if err := store.Close(); err != nil { t.Fatal(err) }
+		store, err = Open(root, files)
+		if err != nil { t.Fatal(err) }
+		got, err := store.Settings()
+		if err != nil { t.Fatal(err) }
+		if got != settings { t.Fatalf("appearance toggles changed other settings after reopening: got %+v, want %+v", got, settings) }
+	}
+}
+
 func TestClientInfoMigrationAndPersistence(t *testing.T) {
  root:=t.TempDir();files,err:=filemanager.NewStore(root+"/files");if err!=nil{t.Fatal(err)}
  store,err:=Open(root,files);if err!=nil{t.Fatal(err)}

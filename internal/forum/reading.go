@@ -17,24 +17,27 @@ main>div{min-width:0}
 #search-form button{min-height:42px;flex-shrink:0;padding:7px 11px;font-size:13px;margin:0}
 #feed-status{min-height:26px;margin:12px 0 0;font-size:12px}
 #feed-status button{margin-left:8px}
-.post{position:relative;border-color:var(--line);padding:22px 0;overflow-wrap:anywhere}
-.post-topic-label{display:inline-block;max-width:100%;padding:1px 7px;border-radius:5px;background:var(--soft);color:var(--muted);font-size:11px;line-height:1.7}
-.post-title{font-size:23px;font-weight:700;line-height:1.5;margin:7px 0 12px;letter-spacing:-.02em;color:var(--ink)}
+.post{position:relative;display:grid;grid-template-columns:minmax(0,1fr);gap:10px;border-color:var(--line);padding:12px 0;overflow-wrap:anywhere}
+.post-main{min-width:0}.post-avatar{display:none;align-self:start;margin-top:2px;width:32px;height:32px;font-size:13px}
+#posts[data-avatars=true] .post{grid-template-columns:32px minmax(0,1fr)}
+#posts[data-avatars=true] .post-avatar{display:grid}
+.post-topic-label{display:inline-block;max-width:100%;padding:0 6px;border-radius:4px;background:var(--soft);color:var(--muted);font-size:11px;line-height:1.8}
+.post-title{font-size:22px;font-weight:650;line-height:1.4;margin:0 0 4px;letter-spacing:-.02em;color:var(--ink)}
 .post-link{color:var(--ink)}.post-link:hover{text-decoration:none}.post-link:hover .post-title{color:var(--accent)}
-.post-footer{display:flex;gap:8px 20px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-.post-meta{display:flex;align-items:center;gap:2px 12px;flex:1;flex-wrap:wrap;min-width:0;font-size:12px;line-height:1.8}
+.post-footer{display:flex;gap:6px 12px;align-items:center;justify-content:space-between}
+.post-meta{display:flex;align-items:center;gap:2px 8px;flex:1;flex-wrap:wrap;min-width:0;font-size:12px;line-height:1.8}
 .post-meta time{white-space:nowrap}
-.post-actions{display:flex;align-items:center;gap:14px;margin-left:auto}
+.post-actions{display:flex;align-items:center;flex-shrink:0;gap:10px;margin-left:auto}
 .post-reply-count{font-size:12px;white-space:nowrap}
-.post-actions .admin-button{font-size:12px;line-height:1.8;padding:3px 10px;min-height:32px}
-.post-preview{color:var(--muted);font-size:14px;line-height:1.8;margin:0 0 12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.post-actions .admin-button{font-size:12px;line-height:1.8;padding:3px 8px;min-height:30px}
+.post-preview{color:var(--muted);font-size:14px;line-height:1.7;margin:6px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .feed-empty{text-align:center;padding:48px 12px}.feed-empty h3{font-size:22px}.feed-empty p{margin-bottom:22px}
 #more{display:block;margin:12px auto 18px;min-width:150px}
 #editor,#settings,#trash{max-width:900px;margin-inline:auto;padding:clamp(20px,4vw,36px)}
 #editor>h2{font-size:27px;margin:0 0 8px}
 .draft-status{color:var(--muted);font-size:12px;margin:0 0 22px}
 #post-form{display:grid;gap:4px}#post-body{min-height:300px;line-height:1.8}
-#settings-form{max-width:720px}
+#settings-form{max-width:720px}.setting-help{margin:6px 0 16px;padding-inline:12px}
 #settings-form>label:has(input[type=checkbox]){padding:12px;background:var(--soft);border-radius:10px}
 #settings h3{border-top:1px solid var(--line);padding-top:22px;margin-top:26px}
 #trash-list h3{padding:12px 16px;background:var(--soft);border-radius:10px;margin-top:28px}
@@ -43,10 +46,24 @@ main>div{min-width:0}
 .topic-row{min-width:0}.topic-row .topic{text-overflow:ellipsis;overflow:hidden}
 #topics .admin-button{font-size:11px;padding:4px}
 #detail{max-width:940px;margin-inline:auto;padding:clamp(20px,4vw,44px)}
-#detail-title{font-size:clamp(27px,3.4vw,38px);line-height:1.45;overflow-wrap:anywhere;margin:10px 0}
-#reading-time{margin:0 0 16px}
-#detail-meta{padding:16px 0;border-block:1px solid var(--line)}
-#detail-body{font-size:18px;line-height:1.95;padding:24px 0;tab-size:4}
+#detail-title{font-size:clamp(27px,3.4vw,36px);line-height:1.4;overflow-wrap:anywhere;margin:8px 0 14px}
+#detail-title:focus{outline:none}
+#detail-meta{padding:0;border:0}
+.visitor-info>div{min-width:0;overflow-wrap:anywhere}
+#detail-meta .visitor-info{align-items:start}
+#detail-meta .visitor-info strong{font-size:13px;font-weight:600}
+.detail-topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.detail-topbar .back{min-height:36px!important;padding:0}
+#reading-time{margin:8px 0 0;font-size:12px}
+#post-tools{min-width:0}#post-tools .admin-tools{margin:0}
+#post-tools .admin-button,#post-tools .action-menu>summary{font-size:12px}
+#article-content{margin:18px 0 24px;padding:20px 0;border-block:1px solid var(--line);min-width:0}
+#content-heading{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:650;line-height:1.5;color:var(--accent);margin:0 0 12px;letter-spacing:0}
+#content-heading::before{content:"";width:3px;height:14px;border-radius:2px;background:var(--accent)}
+#detail[data-body-bubble=true] #article-content{padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:var(--soft)}
+#detail-body{font-size:18px;line-height:1.9;padding:0;tab-size:4}
+#detail-files:empty{display:none}
+.replies-heading{font-size:18px;margin:28px 0 8px}
 #detail-body,.reply .body{word-break:normal;overflow-wrap:anywhere}
 #detail .inline-image{height:auto;max-width:100%}.attachment{max-width:100%}.attachment>span{overflow-wrap:anywhere;min-width:0}.attachment a{white-space:nowrap}
 .reply{border-color:var(--line)}
@@ -62,12 +79,16 @@ input:not([type=checkbox]),select,textarea{min-width:0}button.primary{min-height
  #feed-title{font-size:22px}#compose-link{font-size:12px;padding:7px 11px}
  #search-form{flex-basis:100%}
  #feed-status{min-height:20px;margin-top:8px}
- .post{padding:16px 0}.post-title{font-size:21px;margin:6px 0 10px}
- #posts>.post:first-child{padding-top:10px}
- .post-footer{gap:6px 12px}.post-meta{font-size:11px}
- .post-actions{gap:12px}.post-reply-count{font-size:11px}
+ .post{padding:11px 0;gap:9px}.post-title{font-size:20px;margin:0 0 3px;line-height:1.4}
+ .post-footer{gap:6px 8px}.post-meta{font-size:11px;gap:2px 7px}
+ .post-actions{gap:7px}.post-reply-count{font-size:11px}
+ #detail{padding:16px}
+ #detail[data-body-bubble=true] #article-content{padding:16px 12px}
  #detail-body{font-size:17px}
+ #article-content .content-line{gap:6px}
+ #article-content .line-number{flex-basis:2em}
+ #post-tools .admin-button{padding:5px 8px}
  #reply-form .reply-compose-tools{display:block}
 }
-@media print{.workspace-bar,.workspace-crumb,.workspace-footer,#feed,#editor,#settings,#trash,#post-tools,#reply-form,.admin-tools,.back,dialog{display:none!important}main{display:block!important;width:100%!important;margin:0!important}#detail{max-width:none;border:0!important;box-shadow:none!important;padding:0!important}body{background:white!important;color:black!important}.body{font-size:12pt!important}.inline-image{max-height:14cm}a{color:inherit}}
+@media print{.workspace-bar,.workspace-crumb,.workspace-footer,#feed,#editor,#settings,#trash,#post-tools,#reply-form,.admin-tools,.back,dialog{display:none!important}main{display:block!important;width:100%!important;margin:0!important}#detail{max-width:none;border:0!important;box-shadow:none!important;padding:0!important}#detail #article-content{background:transparent!important;border:0!important;padding:0!important}body{background:white!important;color:black!important}.body{font-size:12pt!important}.inline-image{max-height:14cm}a{color:inherit}}
 </style>`

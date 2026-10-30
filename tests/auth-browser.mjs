@@ -43,6 +43,17 @@ try{
  await page.goto(base+'/account');
  await page.locator('#login [name=username]').fill('siteowner');await page.locator('#login [name=password]').fill(ownerPassword);await page.locator('#login button').click();await page.locator('#management').waitFor();await page.locator('#users button').filter({hasText:'停用'}).click();await page.getByText('browseruser · UID 2 · 已停用',{exact:true}).waitFor();
  await page.goto(base+'/#settings');await page.locator('#guest-posts').uncheck();await page.locator('#guest-uploads').uncheck();await page.locator('#settings-form button[type=submit]').click();await page.locator('#settings-message').filter({hasText:'已保存'}).waitFor();
+ // Saving each appearance combination must preserve every existing setting.
+ const beforeAppearance=await page.evaluate(()=>fetch('/api/forum/settings').then(r=>r.json()));
+ for(const [avatars,bubble] of [[false,true],[true,true],[false,false],[true,false]]){
+  await page.locator('#list-avatars').setChecked(avatars);await page.locator('#body-bubble').setChecked(bubble);
+  const saved=page.waitForResponse(r=>r.url()===base+'/api/forum/settings'&&r.request().method()==='PUT');
+  await page.locator('#settings-form button[type=submit]').click();assert.equal((await saved).status(),200);
+  await page.reload();await page.locator('#posts[aria-busy=false]').waitFor({state:'attached'});
+  assert.equal(await page.locator('#list-avatars').isChecked(),avatars);assert.equal(await page.locator('#body-bubble').isChecked(),bubble);
+  const actual=await page.evaluate(()=>fetch('/api/forum/settings').then(r=>r.json()));
+  assert.deepEqual(actual,{...beforeAppearance,enable_list_avatars:avatars,enable_body_bubble:bubble});
+ }
  assert.deepEqual(errors,[]);await context.close();console.log('Auth browser smoke passed: registration, login, member post/reply, XHR upload, logout, first-user admin, sequential UIDs, user disable, settings, short and long passwords, dropdown topic creation.');
 }finally{
  if(browser)await browser.close();server.kill('SIGTERM');await new Promise(r=>server.once('exit',r));await rm(root,{recursive:true,force:true});
