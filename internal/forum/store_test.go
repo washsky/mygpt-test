@@ -92,15 +92,15 @@ func TestAppearanceSettingsPersistIndependently(t *testing.T) {
 	defer func() { if store != nil { store.Close() } }()
 	settings, err := store.Settings()
 	if err != nil { t.Fatal(err) }
-	if !settings.EnableListAvatars || settings.EnableBodyBubble { t.Fatalf("unexpected appearance defaults: %+v", settings) }
+	if settings.EnableListAvatars || settings.EnableBodyBubble || settings.EnableReplyBubble { t.Fatalf("unexpected appearance defaults: %+v", settings) }
 	settings.EnableLineNumbers = true
 	settings.EnableLineCopy = true
 	settings.EnableQuoteReplies = true
 	settings.EnableResourceRendering = true
 	settings.EnableClipboard = true
 	settings.EnableRealtime = true
-	for _, combination := range [][2]bool{{false, true}, {true, true}, {false, false}, {true, false}} {
-		settings.EnableListAvatars, settings.EnableBodyBubble = combination[0], combination[1]
+	for _, combination := range [][3]bool{{false, false, false}, {false, false, true}, {false, true, false}, {false, true, true}, {true, false, false}, {true, false, true}, {true, true, false}, {true, true, true}} {
+		settings.EnableListAvatars, settings.EnableBodyBubble, settings.EnableReplyBubble = combination[0], combination[1], combination[2]
 		if err := store.SaveSettings(settings); err != nil { t.Fatal(err) }
 		if err := store.Close(); err != nil { t.Fatal(err) }
 		store, err = Open(root, files)

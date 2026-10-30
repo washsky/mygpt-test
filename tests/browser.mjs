@@ -14,6 +14,7 @@ const topics=[{id:'a',name:'日常记录',description:'生活'},{id:'b',name:'�
 const post=id=>({id,title:'给未来的自己留一份记录 · '+id,author:'访客',topic_id:'a',created_at:'2026-01-01T12:00:00Z',reply_count:0,body:'这一篇笔记记录生活与技术。\n'+('文字与长链接 https://example.com/ '+ 'a'.repeat(120)+'\n').repeat(6),replies:[],attachments:[]});
 const imageID='a'.repeat(32),replyID='c'.repeat(32);
 const appearancePost={...post('appearance'),author:'long_account_name_123456789012345',user_id:'author-id',user_uid:12345,client_info:{browser:'Chromium',os:'Linux'},body:'正文的第一行。\n> 一段引用文字。\n引用回复：/#reply/'+replyID+'\n![图片](/api/files/'+imageID+'/preview)\n[附件下载](/api/files/'+imageID+')\n'+('long_text_'.repeat(40)),attachments:[{id:imageID,name:'inline.png',content_type:'image/png',download_url:'/api/files/'+imageID}],replies:[{id:replyID,author:'回复者',created_at:'2026-01-01T13:00:00Z',body:'引用回复功能与正文边框独立。',attachments:[]}]};
+appearancePost.replies[0].attachments=appearancePost.attachments;
 let listCalls=0,failList=false,slow=false,failDetail=false,settingsDelay=0,failSettings=false,fixtureUser=null,authDelay=0;
 await page.route('http://blog.test/**',async route=>{
  const url=new URL(route.request().url());let body={};
@@ -41,6 +42,8 @@ await page.route('http://blog.test/**',async route=>{
 try{
  await page.goto('http://blog.test/');await page.waitForFunction(()=>document.querySelectorAll('.post').length===20);
  assert.equal(await page.locator('#posts').getAttribute('aria-busy'),'false');
+ assert.equal(await page.locator('.post-avatar').first().isVisible(),false,'list avatars should default off');
+ assert.equal(await page.locator('#content-heading').count(),0,'the article should not add a visible body heading');
  // Reading starts with posts; the composer only opens on request.
  assert.equal(await page.locator('#editor').isVisible(),false);
  for(const width of [320,390,768,1440]){
@@ -105,6 +108,11 @@ try{
   for(const avatars of [false,true])for(const bubble of [false,true]){
    settings.enable_list_avatars=avatars;settings.enable_body_bubble=bubble;await page.evaluate(()=>loadSettings());
    assert.equal(await page.locator('.post-avatar').first().isVisible(),avatars);
+   if(avatars){
+    const avatar=await page.locator('.post-avatar').first().boundingBox(),main=await page.locator('.post-main').first().boundingBox();
+    assert.ok(Math.abs(avatar.y+avatar.height/2-main.y-main.height/2)<0.5,'avatar is not centered with the entire post row at '+width);
+    if(process.env.FORUM_SCREENSHOT_PREFIX&&bubble)await page.screenshot({path:process.env.FORUM_SCREENSHOT_PREFIX+'-avatar-'+width+'.png'});
+   }
    assert.equal(await page.evaluate(()=>window.firstRow===document.querySelector('.post')),true);
    const first=await page.locator('.post').first().boundingBox();if(width>=390)assert.ok(first.height<110,'post rows are too sparse at '+width+': '+first.height);
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'appearance feed overflow at '+width);
@@ -112,8 +120,8 @@ try{
  }
  // Every combination of line tools, quotes and resource rendering works with either body style.
  await page.setViewportSize({width:320,height:900});await page.goto('http://blog.test/#post/appearance');await page.locator('#detail-title').filter({hasText:'appearance'}).waitFor();
- for(const bubble of [false,true])for(let mask=0;mask<16;mask++){
-  Object.assign(settings,{enable_body_bubble:bubble,enable_line_numbers:!!(mask&1),enable_line_copy:!!(mask&2),enable_quote_replies:!!(mask&4),enable_resource_rendering:!!(mask&8),enable_client_info:true,client_browser:true,client_os:true});
+ for(const bubble of [false,true])for(const replyBubble of [false,true])for(let mask=0;mask<16;mask++){
+  Object.assign(settings,{enable_body_bubble:bubble,enable_reply_bubble:replyBubble,enable_line_numbers:!!(mask&1),enable_line_copy:!!(mask&2),enable_quote_replies:!!(mask&4),enable_resource_rendering:!!(mask&8),enable_client_info:true,client_browser:true,client_os:true});
   await page.evaluate(async()=>{await loadSettings();await showPost('appearance')});
   assert.equal(await page.locator('#detail-body .line-number').count(),mask&1?appearancePost.body.split('\n').length:0);
   assert.equal(await page.locator('#detail-body .line-copy').count(),mask&2?appearancePost.body.split('\n').length:0);
@@ -123,15 +131,21 @@ try{
   assert.equal(await page.locator('#article-content #detail-files img').count(),1);
   assert.equal(await page.locator('#replies button').filter({hasText:'引用回复'}).count(),mask&4?1:0);
   assert.equal(await page.locator('#article-content').evaluate(el=>parseFloat(getComputedStyle(el).borderRadius)>0),bubble);
+  assert.equal(await page.locator('.reply-content').first().evaluate(el=>parseFloat(getComputedStyle(el).borderRadius)>0),replyBubble);
+  assert.equal(await page.locator('.reply-content .line-number').count(),mask&1?1:0);
+  assert.equal(await page.locator('.reply-content .line-copy').count(),mask&2?1:0);
+  assert.equal(await page.locator('.reply-content .reply-files img').count(),1);
+  if(mask&3)assert.ok((await page.locator('.reply-content .line-text').first().boundingBox()).width>=130,'reply tools squeezed the content: '+replyBubble+'/'+mask);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'body feature combination overflow: '+bubble+'/'+mask);
  }
- await page.evaluate(()=>window.bodyBefore=document.getElementById('detail-body'));
- settings.enable_body_bubble=false;settings.enable_list_avatars=false;await page.evaluate(()=>loadSettings());
- assert.equal(await page.evaluate(()=>window.bodyBefore===document.getElementById('detail-body')),true);
+ await page.evaluate(()=>{window.bodyBefore=document.getElementById('detail-body').firstChild;window.replyBefore=document.querySelector('.reply-content .body').firstChild});
+ settings.enable_body_bubble=false;settings.enable_reply_bubble=false;settings.enable_list_avatars=false;await page.evaluate(()=>loadSettings());
+ assert.equal(await page.evaluate(()=>window.bodyBefore===document.getElementById('detail-body').firstChild&&window.replyBefore===document.querySelector('.reply-content .body').firstChild),true);
  if(process.env.FORUM_SCREENSHOT_PREFIX){
   for(const theme of ['light','dark'])for(const bubble of [false,true]){
-   settings.enable_body_bubble=bubble;await page.evaluate(async theme=>{document.documentElement.dataset.theme=theme;await loadSettings()},theme);
+   settings.enable_body_bubble=bubble;settings.enable_reply_bubble=bubble;await page.evaluate(async theme=>{document.documentElement.dataset.theme=theme;await loadSettings()},theme);
    await page.locator('#detail-title').scrollIntoViewIfNeeded();await page.screenshot({path:process.env.FORUM_SCREENSHOT_PREFIX+'-detail-'+theme+'-'+bubble+'.png'});
+   await page.locator('.reply').first().scrollIntoViewIfNeeded();await page.screenshot({path:process.env.FORUM_SCREENSHOT_PREFIX+'-reply-'+theme+'-'+bubble+'.png'});
   }
  }
  for(const key of Object.keys(settings))delete settings[key];Object.assign(settings,originalSettings);
@@ -196,5 +210,5 @@ try{
  await page.locator('#compose-back').click();await page.locator('#feed').waitFor();
  await page.locator('.post-link').first().click();await page.getByText('暂时无法打开内容',{exact:true}).waitFor();assert.equal(await page.locator('#feed').isVisible(),false);
  assert.deepEqual(errors,[]);
- console.log('PASS: independent appearance switches, compact avatars, 32 line/quote/resource and body-style combinations; post-focused responsive feed, separate composer, retained drafts and guest publishing permission; fixed mobile menu cells across labels, pages and selection; stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
+ console.log('PASS: independent appearance switches, compact avatars, 64 line/quote/resource and independent post/reply bubble combinations; post-focused responsive feed, separate composer, retained drafts and guest publishing permission; fixed mobile menu cells across labels, pages and selection; stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
 }finally{await browser.close()}

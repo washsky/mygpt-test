@@ -45,14 +45,14 @@ try{
  await page.goto(base+'/#settings');await page.locator('#guest-posts').uncheck();await page.locator('#guest-uploads').uncheck();await page.locator('#settings-form button[type=submit]').click();await page.locator('#settings-message').filter({hasText:'已保存'}).waitFor();
  // Saving each appearance combination must preserve every existing setting.
  const beforeAppearance=await page.evaluate(()=>fetch('/api/forum/settings').then(r=>r.json()));
- for(const [avatars,bubble] of [[false,true],[true,true],[false,false],[true,false]]){
-  await page.locator('#list-avatars').setChecked(avatars);await page.locator('#body-bubble').setChecked(bubble);
+ for(const avatars of [false,true])for(const bubble of [false,true])for(const replyBubble of [false,true]){
+  await page.locator('#list-avatars').setChecked(avatars);await page.locator('#body-bubble').setChecked(bubble);await page.locator('#reply-bubble').setChecked(replyBubble);
   const saved=page.waitForResponse(r=>r.url()===base+'/api/forum/settings'&&r.request().method()==='PUT');
   await page.locator('#settings-form button[type=submit]').click();assert.equal((await saved).status(),200);
   await page.reload();await page.locator('#posts[aria-busy=false]').waitFor({state:'attached'});
-  assert.equal(await page.locator('#list-avatars').isChecked(),avatars);assert.equal(await page.locator('#body-bubble').isChecked(),bubble);
+  assert.equal(await page.locator('#list-avatars').isChecked(),avatars);assert.equal(await page.locator('#body-bubble').isChecked(),bubble);assert.equal(await page.locator('#reply-bubble').isChecked(),replyBubble);
   const actual=await page.evaluate(()=>fetch('/api/forum/settings').then(r=>r.json()));
-  assert.deepEqual(actual,{...beforeAppearance,enable_list_avatars:avatars,enable_body_bubble:bubble});
+  assert.deepEqual(actual,{...beforeAppearance,enable_list_avatars:avatars,enable_body_bubble:bubble,enable_reply_bubble:replyBubble});
  }
  assert.deepEqual(errors,[]);await context.close();console.log('Auth browser smoke passed: registration, login, member post/reply, XHR upload, logout, first-user admin, sequential UIDs, user disable, settings, short and long passwords, dropdown topic creation.');
 }finally{
