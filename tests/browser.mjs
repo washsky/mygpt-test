@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || (process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES ? process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES + '/playwright' : 'playwright'));
-import { html,fileHTML,calculatorHTML } from './embedded.mjs';
+import { html,fileHTML,calculatorHTML,accountHTML } from './embedded.mjs';
 const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH,args:['--no-sandbox']});
 const context=await browser.newContext();
 const page=await context.newPage();
@@ -12,14 +12,15 @@ const errors=[];page.on('pageerror',error=>errors.push(error.message));
 const settings={title:'山间札记',description:'记录技术、生活与每一次新的发现。',allow_guest_posts:true,allow_guest_replies:true,enable_search:true};
 const topics=[{id:'a',name:'日常记录',description:'生活'},{id:'b',name:'技术笔记',description:'技术'}];
 const post=id=>({id,title:'给未来的自己留一份记录 · '+id,author:'访客',topic_id:'a',created_at:'2026-01-01T12:00:00Z',reply_count:0,body:'这一篇笔记记录生活与技术。\n'+('文字与长链接 https://example.com/ '+ 'a'.repeat(120)+'\n').repeat(6),replies:[],attachments:[]});
-let listCalls=0,failList=false,slow=false,failDetail=false;
+let listCalls=0,failList=false,slow=false,failDetail=false,settingsDelay=0,failSettings=false;
 await page.route('http://blog.test/**',async route=>{
  const url=new URL(route.request().url());let body={};
  if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
  if(url.pathname==='/files')return route.fulfill({contentType:'text/html',body:fileHTML});
  if(url.pathname==='/calculator')return route.fulfill({contentType:'text/html',body:calculatorHTML});
+ if(url.pathname==='/account')return route.fulfill({contentType:'text/html',body:accountHTML});
  if(url.pathname==='/api/auth/me')body={user:null,csrf_token:'',allow_registration:true,first_registration:false};
- else if(url.pathname==='/api/forum/settings')body=settings;
+ else if(url.pathname==='/api/forum/settings'){if(settingsDelay)await new Promise(resolve=>setTimeout(resolve,settingsDelay));if(failSettings)return route.fulfill({status:503,body:'unavailable'});body=settings;}
  else if(url.pathname==='/api/forum/topics')body={items:topics};
  else if(url.pathname==='/api/forum/posts'){
   listCalls++;
@@ -81,6 +82,30 @@ try{
  // Missing articles clear old metadata rather than presenting stale content.
  failDetail=true;await page.evaluate(()=>{location.hash='post/missing'});await page.getByText('暂时无法打开内容',{exact:true}).waitFor();
  assert.equal(await page.locator('#detail-meta').textContent(),'');
+ // The clipboard entry must not disappear while each new page awaits settings.
+ settings.enable_clipboard=true;
+ await page.goto('http://blog.test/');await page.locator('#workspace-clipboard').waitFor();
+ for(const path of ['/files','/calculator','/account']){
+  settingsDelay=600;await page.goto('http://blog.test'+path);
+  assert.equal(await page.locator('#workspace-clipboard').isVisible(),true,'clipboard disappeared before settings on '+path);
+  await page.waitForTimeout(100);assert.equal(await page.locator('#workspace-clipboard').isVisible(),true);
+  await page.waitForFunction(()=>window.workspaceOptions.title==='山间札记');
+ }
+ settingsDelay=0;await page.locator('#workspace-forum').click();await page.locator('#workspace-clipboard').waitFor();
+ await page.evaluate(()=>window.clipboardEntry=document.getElementById('workspace-clipboard'));
+ await page.locator('#workspace-forum').click();await page.keyboard.press('Escape');
+ await page.locator('.workspace-nav>details>summary').click();await page.keyboard.press('Escape');
+ assert.equal(await page.evaluate(()=>window.clipboardEntry===document.getElementById('workspace-clipboard')),true);
+ await page.locator('#workspace-clipboard').click();await page.locator('#clipboard-dialog').waitFor();await page.locator('#clipboard-close').click();
+ settings.enable_clipboard=false;await page.evaluate(()=>window.dispatchEvent(new Event('workspace-settings-saved')));
+ await page.waitForFunction(()=>document.documentElement.dataset.clipboardEnabled==='false');
+ assert.equal(await page.locator('#workspace-clipboard').isVisible(),false);
+ settingsDelay=600;await page.goto('http://blog.test/files');assert.equal(await page.locator('#workspace-clipboard').isVisible(),false);
+ await page.waitForFunction(()=>window.workspaceOptions.title==='山间札记');
+ settingsDelay=0;settings.enable_clipboard=true;await page.evaluate(()=>window.dispatchEvent(new Event('workspace-settings-saved')));await page.locator('#workspace-clipboard').waitFor();
+ failSettings=true;await page.goto('http://blog.test/calculator');assert.equal(await page.locator('#workspace-clipboard').isVisible(),true);
+ await page.waitForFunction(()=>document.querySelector('#connection-status').textContent.includes('连接失败'));
+ assert.equal(await page.locator('#workspace-clipboard').isVisible(),true);
  assert.deepEqual(errors,[]);
- console.log('PASS: topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
+ console.log('PASS: stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
 }finally{await browser.close()}
