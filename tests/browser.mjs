@@ -38,6 +38,17 @@ await page.route('http://blog.test/**',async route=>{
 try{
  await page.goto('http://blog.test/');await page.waitForFunction(()=>document.querySelectorAll('.post').length===20);
  assert.equal(await page.locator('#posts').getAttribute('aria-busy'),'false');
+ // Reading starts with posts; the composer only opens on request.
+ assert.equal(await page.locator('#editor').isVisible(),false);
+ for(const width of [320,390,768,1440]){
+  await page.setViewportSize({width,height:900});
+  const first=await page.locator('.post-title').first().boundingBox();
+  if(process.env.FORUM_SCREENSHOT_PREFIX)await page.screenshot({path:process.env.FORUM_SCREENSHOT_PREFIX+'-'+width+'.png'});
+  assert.ok(first&&first.y<450,'first post is pushed below the first screen at '+width+': '+JSON.stringify(first));
+  assert.ok(await page.evaluate(()=>parseFloat(getComputedStyle(document.querySelector('.post-title')).fontSize)>parseFloat(getComputedStyle(document.querySelector('#site-title')).fontSize)));
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'feed overflow at '+width);
+ }
+ await page.setViewportSize({width:1440,height:1000});
  // Navigation from another page enters the forum first; a second click opens topics.
  assert.equal(await page.locator('aside').count(),0);assert.equal(await page.locator('#topic-panel').isVisible(),false);
  for(const path of ['/files','/calculator']){
@@ -64,9 +75,13 @@ try{
  await page.locator('#search-query').fill('不存在');await page.locator('#search-form button[type=submit]').click();
  await page.getByText('没有找到相关笔记',{exact:true}).waitFor();await page.locator('#clear-search').click();await page.waitForFunction(()=>document.querySelectorAll('.post').length===20);
  // Topic refresh preserves the in-progress draft selection.
+ await page.locator('#compose-link').click();await page.locator('#editor').waitFor();assert.equal(await page.locator('#feed').isVisible(),false);
+ assert.equal(await page.locator('#post-title').evaluate(el=>el===document.activeElement),true);
  await page.locator('#post-topic').selectOption('b');await page.evaluate(()=>loadTopics());assert.equal(await page.locator('#post-topic').inputValue(),'b');
  await page.locator('#post-body').fill('尚未发布的草稿');await page.waitForTimeout(350);await page.reload();await page.waitForFunction(()=>document.querySelector('#post-body').value==='尚未发布的草稿');
  assert.equal(await page.locator('#post-topic').inputValue(),'b');
+ await page.locator('#compose-back').click();await page.locator('#feed').waitFor();assert.equal(await page.locator('#editor').isVisible(),false);
+ await page.locator('#compose-link').click();await page.locator('#editor').waitFor();assert.equal(await page.locator('#post-body').inputValue(),'尚未发布的草稿');
  // A slow old detail request cannot overwrite the next selected post.
  await page.evaluate(()=>{location.hash='post/slow'});await page.waitForTimeout(50);await page.evaluate(()=>{location.hash='post/1'});
  await page.waitForFunction(()=>document.title.startsWith('给未来的自己留一份记录 · 1'));await page.waitForTimeout(350);
@@ -129,6 +144,15 @@ try{
  }
  settings.enable_clipboard=false;await page.evaluate(()=>window.dispatchEvent(new Event('workspace-settings-saved')));
  const beforeDisable=await menuCells();await page.waitForFunction(()=>document.documentElement.dataset.clipboardEnabled==='false');assert.deepEqual((await menuCells()).slice(0,5),beforeDisable.slice(0,5));
+ // Direct compose links respect guest publishing settings and keep a login route.
+ fixtureUser=null;authDelay=0;settings.allow_guest_posts=false;
+ await page.goto('http://blog.test/#compose');await page.locator('#compose-permission').waitFor();
+ assert.equal(await page.locator('#post-form').isVisible(),false);assert.equal(await page.locator('#feed').isVisible(),false);
+ assert.equal(await page.locator('#compose-permission a').getAttribute('href'),'/account');
+ fixtureUser={id:'writer',username:'已登录作者',uid:2,role:'member'};
+ await page.reload();await page.locator('#post-title').waitFor();assert.equal(await page.locator('#compose-permission').isVisible(),false);
+ await page.locator('#compose-back').click();await page.locator('#feed').waitFor();
+ await page.locator('.post-link').first().click();await page.getByText('暂时无法打开内容',{exact:true}).waitFor();assert.equal(await page.locator('#feed').isVisible(),false);
  assert.deepEqual(errors,[]);
- console.log('PASS: fixed mobile menu cells across labels, pages and selection; stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
+ console.log('PASS: post-focused responsive feed, separate composer, retained drafts and guest publishing permission; fixed mobile menu cells across labels, pages and selection; stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
 }finally{await browser.close()}

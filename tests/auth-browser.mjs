@@ -30,7 +30,7 @@ try{
  await page.locator('#status').filter({hasText:'账户已创建'}).waitFor();
  await page.locator('#login [name=username]').fill('browseruser');await page.locator('#login [name=password]').fill(memberPassword);await page.locator('#login button').click();
  await page.locator('#signed-in').waitFor();assert.match(await page.locator('#identity').textContent(),/browseruser/);
- await page.goto(base+'/');await page.locator('#post-author[readonly]').waitFor();
+ await page.goto(base+'/');await page.locator('#compose-link').click();await page.locator('#post-author[readonly]').waitFor();
  await page.locator('#post-title').fill('账户笔记');await page.locator('#post-body').fill('浏览器实际发布');await page.locator('#post-form button[type=submit]').click();
  await page.locator('#detail-title').filter({hasText:'账户笔记'}).waitFor();assert.match(await page.locator('#detail-meta').textContent(),/browseruser · UID 2 · 注册用户/);
  await page.locator('#reply-body').fill('账户回复');await page.locator('#reply-form button[type=submit]').click();await page.locator('.reply').filter({hasText:'账户回复'}).waitFor();
