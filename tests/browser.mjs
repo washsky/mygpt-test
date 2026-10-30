@@ -12,14 +12,14 @@ const errors=[];page.on('pageerror',error=>errors.push(error.message));
 const settings={title:'山间札记',description:'记录技术、生活与每一次新的发现。',allow_guest_posts:true,allow_guest_replies:true,enable_search:true};
 const topics=[{id:'a',name:'日常记录',description:'生活'},{id:'b',name:'技术笔记',description:'技术'}];
 const post=id=>({id,title:'给未来的自己留一份记录 · '+id,author:'访客',topic_id:'a',created_at:'2026-01-01T12:00:00Z',reply_count:0,body:'这一篇笔记记录生活与技术。\n'+('文字与长链接 https://example.com/ '+ 'a'.repeat(120)+'\n').repeat(6),replies:[],attachments:[]});
-let listCalls=0,failList=false,slow=false,failDetail=false,settingsDelay=0,failSettings=false;
+let listCalls=0,failList=false,slow=false,failDetail=false,settingsDelay=0,failSettings=false,fixtureUser=null,authDelay=0;
 await page.route('http://blog.test/**',async route=>{
  const url=new URL(route.request().url());let body={};
  if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
  if(url.pathname==='/files')return route.fulfill({contentType:'text/html',body:fileHTML});
  if(url.pathname==='/calculator')return route.fulfill({contentType:'text/html',body:calculatorHTML});
  if(url.pathname==='/account')return route.fulfill({contentType:'text/html',body:accountHTML});
- if(url.pathname==='/api/auth/me')body={user:null,csrf_token:'',allow_registration:true,first_registration:false};
+ if(url.pathname==='/api/auth/me'){if(authDelay)await new Promise(resolve=>setTimeout(resolve,authDelay));body={user:fixtureUser,csrf_token:'',allow_registration:true,first_registration:false};}
  else if(url.pathname==='/api/forum/settings'){if(settingsDelay)await new Promise(resolve=>setTimeout(resolve,settingsDelay));if(failSettings)return route.fulfill({status:503,body:'unavailable'});body=settings;}
  else if(url.pathname==='/api/forum/topics')body={items:topics};
  else if(url.pathname==='/api/forum/posts'){
@@ -106,6 +106,29 @@ try{
  failSettings=true;await page.goto('http://blog.test/calculator');assert.equal(await page.locator('#workspace-clipboard').isVisible(),true);
  await page.waitForFunction(()=>document.querySelector('#connection-status').textContent.includes('连接失败'));
  assert.equal(await page.locator('#workspace-clipboard').isVisible(),true);
+ // Mobile controls keep their own cells as labels, selection and pages change.
+ failSettings=false;settingsDelay=0;settings.enable_clipboard=true;
+ fixtureUser={id:'layout-user',username:'long_account_name_123456789012345',uid:12345,role:'member'};authDelay=600;
+ const menuCells=()=>page.locator('.workspace-nav').evaluate(nav=>Array.from(nav.children,el=>{const r=el.getBoundingClientRect();return [r.x,r.y,r.width,r.height].map(n=>Math.round(n*10)/10)}));
+ for(const width of [320,360,390,430,600,760]){
+  await page.setViewportSize({width,height:900});await page.goto('http://blog.test/');
+  const initial=await menuCells();assert.equal(initial.length,6);
+  await page.waitForFunction(()=>document.querySelector('#workspace-account').textContent.includes('UID 12345'));
+  assert.deepEqual(await menuCells(),initial,'account label moved mobile controls at '+width);
+  assert.ok(initial.slice(0,3).every(r=>r[1]===initial[0][1])&&initial.slice(3).every(r=>r[1]===initial[3][1])&&initial[3][1]>initial[0][1],'mobile rows are not three plus three');
+  await page.locator('.workspace-nav>details>summary').click();assert.deepEqual(await menuCells(),initial);
+  await page.locator('a[data-section=settings]').click();await page.locator('#settings').waitFor();assert.deepEqual(await menuCells(),initial);
+  await page.locator('#workspace-forum').click();await page.locator('#feed').waitFor();assert.deepEqual(await menuCells(),initial);
+  await page.locator('#workspace-forum').click();await page.locator('#topic-panel').waitFor();assert.deepEqual(await menuCells(),initial);await page.keyboard.press('Escape');
+  await page.locator('.workspace-nav a[href="/files"]').click();assert.deepEqual(await menuCells(),initial,'file page moved mobile controls at '+width);
+  await page.waitForFunction(()=>document.querySelector('#workspace-account').textContent.includes('UID 12345'));assert.deepEqual(await menuCells(),initial);
+  await page.locator('.workspace-nav a[href="/calculator"]').click();assert.deepEqual(await menuCells(),initial,'calculator page moved mobile controls at '+width);
+  await page.waitForFunction(()=>document.querySelector('#workspace-account').textContent.includes('UID 12345'));
+  await page.evaluate(()=>document.getElementById('workspace-clipboard').textContent='剪贴板 · 有更新');assert.deepEqual(await menuCells(),initial);
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile menu overflow at '+width);
+ }
+ settings.enable_clipboard=false;await page.evaluate(()=>window.dispatchEvent(new Event('workspace-settings-saved')));
+ const beforeDisable=await menuCells();await page.waitForFunction(()=>document.documentElement.dataset.clipboardEnabled==='false');assert.deepEqual((await menuCells()).slice(0,5),beforeDisable.slice(0,5));
  assert.deepEqual(errors,[]);
- console.log('PASS: stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
+ console.log('PASS: fixed mobile menu cells across labels, pages and selection; stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
 }finally{await browser.close()}
