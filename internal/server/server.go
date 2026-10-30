@@ -9,9 +9,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+ "strings"
 	"time"
 
 	"github.com/washsky/mygpt-test/internal/appdata"
+ "github.com/washsky/mygpt-test/internal/auth"
 	"github.com/washsky/mygpt-test/internal/calculator"
 	"github.com/washsky/mygpt-test/internal/filemanager"
 	"github.com/washsky/mygpt-test/internal/forum"
@@ -57,7 +59,9 @@ func Start(addr, version, dataDir string) error {
 	defer board.Close()
 	token, err := board.AdminToken(paths.Config)
 	if err != nil { return err }
-	mux := http.NewServeMux()
+	accounts,err:=auth.Open(paths.Database,token,func()(bool,error){settings,err:=board.Settings();return settings.AllowRegistration,err});if err!=nil{return err};defer accounts.Close()
+ mux := http.NewServeMux()
+ accounts.Register(mux)
  events,err := live.New(func() (live.Options,error) { s,err:=board.Settings();return live.Options{Realtime:s.EnableRealtime,Clipboard:s.EnableClipboard,ClipboardTTLMinutes:s.ClipboardTTLMinutes},err },paths.Database,files)
  if err!=nil{return err}
  defer events.Close()
@@ -135,7 +139,7 @@ func Start(addr, version, dataDir string) error {
 	}
 
 	server := &http.Server{
-		Handler:           sameOriginWrites(events.Wrap(mux)),
+		Handler:           sameOriginWrites(accounts.Wrap(guestPermissions(board,token,events.Wrap(mux)))),
 		ReadHeaderTimeout: 5 * time.Second,
  IdleTimeout: 90 * time.Second,
  MaxHeaderBytes: 1 << 20,
@@ -156,6 +160,7 @@ func Start(addr, version, dataDir string) error {
 func sameOriginWrites(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+   if r.Header.Get("Sec-Fetch-Site")=="cross-site" {http.Error(w,"cross-site write rejected",403);return}
 			if origin := r.Header.Get("Origin"); origin != "" {
 				parsed, err := url.Parse(origin)
 				if err != nil || parsed.Host != r.Host || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -166,6 +171,17 @@ func sameOriginWrites(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Browsing and the calculator stay public. Guest collaboration is configurable.
+func guestPermissions(board *forum.Store,token string,next http.Handler)http.Handler {
+ return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  if auth.Current(r)==nil&&!auth.IsAdmin(r,token)&&(r.URL.Path=="/api/files"&&r.Method=="POST"||strings.HasPrefix(r.URL.Path,"/api/clipboard")) {
+   settings,err:=board.Settings();if err!=nil{http.Error(w,"无法读取权限设置",500);return}
+   if r.URL.Path=="/api/files"&&!settings.AllowGuestUploads||strings.HasPrefix(r.URL.Path,"/api/clipboard")&&!settings.AllowGuestClipboard {http.Error(w,"此功能需要登录",401);return}
+  }
+  next.ServeHTTP(w,r)
+ })
 }
 
 const page = `<!doctype html>

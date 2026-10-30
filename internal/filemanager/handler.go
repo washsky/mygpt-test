@@ -2,7 +2,7 @@ package filemanager
 
 import (
 	"bytes"
-	"crypto/subtle"
+	"github.com/washsky/mygpt-test/internal/auth"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -56,8 +56,7 @@ func RegisterRoutes(mux *http.ServeMux, store Store, links Linker, token string)
 }
 
 func (h *apiHandler) admin(w http.ResponseWriter, r *http.Request) bool {
-	value := r.Header.Get("X-Admin-Token")
-	if len(value) != len(h.token) || subtle.ConstantTimeCompare([]byte(value), []byte(h.token)) != 1 {
+	if !auth.IsAdmin(r,h.token) {
 		http.Error(w, "admin token required (see data/config/admin-token)", http.StatusForbidden)
 		return false
 	}
@@ -148,6 +147,12 @@ func (h *apiHandler) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+ if association.Type!=""&&!auth.IsAdmin(r,h.token) {
+  if owners,ok:=h.links.(interface{AuthorID(string,string)(string,error)});ok {
+   owner,err:=owners.AuthorID(association.Type,association.ID);if err!=nil{http.Error(w,"关联内容不存在",400);return}
+   user:=auth.Current(r);if owner!=""&&(user==nil||user.ID!=owner){http.Error(w,"只能为自己的账户内容添加附件",403);return}
+  }
+ }
 	record, err := h.store.Save(name, contentType, Association{}, io.MultiReader(bytes.NewReader(prefix), file))
 	if err != nil {
 		if errors.Is(err, ErrTooLarge) {

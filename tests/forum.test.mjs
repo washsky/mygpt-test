@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {html,source} from './embedded.mjs';
+import {html,source,accountHTML} from './embedded.mjs';
 
 class Element {
  constructor(tag='div',text='',className=''){this.tag=tag;this.textContent=text;this.className=className;this.children=[];this.attributes={};this.value='';this.options=[];this.classes=new Set();this.classList={add:x=>this.classes.add(x),remove:x=>this.classes.delete(x),toggle:(x,on)=>on?this.classes.add(x):this.classes.delete(x)};}
@@ -22,7 +22,7 @@ function fixture(){
 const posts=Array.from({length:20},(_,i)=>({id:String(i),title:'笔记'+i,author:'作者',created_at:'2026-01-01',reply_count:0}));
 
 test('all assembled inline scripts parse',()=>{
- let count=0;for(const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)){new vm.Script(match[1]);count++}assert.ok(count>=4);
+ let count=0;for(const match of (html+accountHTML).matchAll(/<script>([\s\S]*?)<\/script>/g)){new vm.Script(match[1]);count++}assert.ok(count>=4);
  assert.ok(html.includes('id="feed-status"'));assert.ok(html.includes('id="main-content"'));
 });
 test('pagination coalesces duplicate clicks and appends exactly once',async()=>{
