@@ -22,7 +22,6 @@ import (
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const cookieName = "mygpt_session"
@@ -62,7 +61,7 @@ type Service struct {
 	db           *sql.DB
 	registration func() (bool, error)
 	secure       bool
-	dummy        []byte
+	dummy        string
 	mu           sync.Mutex
 	attempts     map[string]window
 	workers      chan struct{}
@@ -113,7 +112,7 @@ func Open(dir string, registration func() (bool, error)) (*Service, error) {
 		db.Close()
 		return nil, err
 	}
-	dummy, err := bcrypt.GenerateFromPassword([]byte("unavailable-account-password"), bcrypt.DefaultCost)
+	dummy, err := hashPassword("unavailable-account-password")
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -177,7 +176,7 @@ func input(w http.ResponseWriter, r *http.Request, v any) bool {
 		http.Error(w, "请使用 JSON 请求", 415)
 		return false
 	}
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		http.Error(w, "请求格式无效", 400)
@@ -241,7 +240,7 @@ type credentials struct {
 	Password string `json:"password"`
 }
 
-func validPassword(p string) bool { return len(p) >= 12 && len(p) <= 72 }
+func validPassword(p string) bool { return p != "" }
 func (s *Service) me(w http.ResponseWriter, r *http.Request) {
 	enabled, err := s.registration()
 	if err != nil {
@@ -268,10 +267,10 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 	}
 	c.Username = strings.ToLower(strings.TrimSpace(c.Username))
 	if !usernamePattern.MatchString(c.Username) || !validPassword(c.Password) {
-		http.Error(w, "用户名需 3–32 位小写字母、数字、下划线或短横线，密码需 12–72 字节", 400)
+		http.Error(w, "用户名需 3–32 位小写字母、数字、下划线或短横线，密码不能为空", 400)
 		return
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(c.Password), bcrypt.DefaultCost)
+	hash, err := hashPassword(c.Password)
 	if err != nil {
 		http.Error(w, "无法创建账户", 500)
 		return
@@ -347,11 +346,11 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "登录暂时不可用", 503)
 		return
 	}
-	check := []byte(hash)
+	check := hash
 	if err != nil {
 		check = s.dummy
 	}
-	if bcrypt.CompareHashAndPassword(check, []byte(c.Password)) != nil || err != nil || u.Disabled {
+	if verifyPassword(check, c.Password) != nil || err != nil || u.Disabled {
 		http.Error(w, "用户名或密码错误，或账户已停用", 401)
 		return
 	}
@@ -430,7 +429,7 @@ func (s *Service) password(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validPassword(in.New) {
-		http.Error(w, "新密码需 12–72 字节", 400)
+		http.Error(w, "新密码不能为空", 400)
 		return
 	}
 	var hash string
@@ -438,11 +437,11 @@ func (s *Service) password(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "无法读取账户", 500)
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.Current)) != nil {
+	if verifyPassword(hash, in.Current) != nil {
 		http.Error(w, "当前密码错误", 403)
 		return
 	}
-	next, err := bcrypt.GenerateFromPassword([]byte(in.New), bcrypt.DefaultCost)
+	next, err := hashPassword(in.New)
 	if err != nil {
 		http.Error(w, "修改密码失败", 500)
 		return

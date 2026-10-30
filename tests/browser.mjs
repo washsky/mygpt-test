@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || (process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES ? process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES + '/playwright' : 'playwright'));
-import { html } from './embedded.mjs';
+import { html,fileHTML,calculatorHTML } from './embedded.mjs';
 const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH,args:['--no-sandbox']});
 const context=await browser.newContext();
 const page=await context.newPage();
@@ -16,7 +16,10 @@ let listCalls=0,failList=false,slow=false,failDetail=false;
 await page.route('http://blog.test/**',async route=>{
  const url=new URL(route.request().url());let body={};
  if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
- if(url.pathname==='/api/forum/settings')body=settings;
+ if(url.pathname==='/files')return route.fulfill({contentType:'text/html',body:fileHTML});
+ if(url.pathname==='/calculator')return route.fulfill({contentType:'text/html',body:calculatorHTML});
+ if(url.pathname==='/api/auth/me')body={user:null,csrf_token:'',allow_registration:true,first_registration:false};
+ else if(url.pathname==='/api/forum/settings')body=settings;
  else if(url.pathname==='/api/forum/topics')body={items:topics};
  else if(url.pathname==='/api/forum/posts'){
   listCalls++;
@@ -34,6 +37,19 @@ await page.route('http://blog.test/**',async route=>{
 try{
  await page.goto('http://blog.test/');await page.waitForFunction(()=>document.querySelectorAll('.post').length===20);
  assert.equal(await page.locator('#posts').getAttribute('aria-busy'),'false');
+ // Navigation from another page enters the forum first; a second click opens topics.
+ assert.equal(await page.locator('aside').count(),0);assert.equal(await page.locator('#topic-panel').isVisible(),false);
+ for(const path of ['/files','/calculator']){
+  await page.goto('http://blog.test'+path);await page.locator('#workspace-forum').click();await page.waitForFunction(()=>document.querySelectorAll('.post').length===20);
+  assert.equal(await page.locator('#topic-panel').isVisible(),false);
+  await page.locator('#workspace-forum').click();await page.locator('#topic-panel').waitFor();
+  await page.getByRole('button',{name:'技术笔记',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#feed-title').textContent==='技术笔记');assert.equal(await page.locator('#topic-panel').isVisible(),false);
+ }
+ await page.goto('http://blog.test/#settings');await page.locator('#settings').waitFor();await page.locator('#workspace-forum').click();await page.locator('#feed').waitFor();assert.equal(await page.locator('#topic-panel').isVisible(),false);
+ await page.locator('#workspace-forum').click();await page.locator('#topic-panel').waitFor();await page.locator('#feed-title').click();assert.equal(await page.locator('#topic-panel').isVisible(),false);
+ await page.locator('#workspace-forum').focus();await page.keyboard.press('ArrowDown');await page.locator('#topic-panel').waitFor();await page.keyboard.press('Escape');assert.equal(await page.locator('#workspace-forum').getAttribute('aria-expanded'),'false');assert.equal(await page.locator('#workspace-forum').evaluate(el=>el===document.activeElement),true);
+ for(const width of [360,390,768,1440]){await page.setViewportSize({width,height:900});await page.locator('#workspace-forum').click();const panel=await page.locator('#topic-panel').boundingBox();assert.ok(panel&&panel.x>=0&&panel.x+panel.width<=width+1,`topic panel overflow at ${width}`);await page.keyboard.press('Escape')}
+ await page.setViewportSize({width:1440,height:1000});
  // Parallel pagination clicks must request only one page.
  slow=true;const before=listCalls;
  await page.evaluate(()=>{loadPosts(true);loadPosts(true)});
@@ -66,5 +82,5 @@ try{
  failDetail=true;await page.evaluate(()=>{location.hash='post/missing'});await page.getByText('暂时无法打开内容',{exact:true}).waitFor();
  assert.equal(await page.locator('#detail-meta').textContent(),'');
  assert.deepEqual(errors,[]);
- console.log('PASS: pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
+ console.log('PASS: topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
 }finally{await browser.close()}

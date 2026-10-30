@@ -48,6 +48,17 @@ jobs:
       - name: Frontend and cleanup regression tests
         run: node --test tests/forum.test.mjs tests/cleanup.test.cjs
 
+      - name: Browser regression tests
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/browser-tests/node_modules/playwright
+          MYGPT_TEST_BINARY: ${{ runner.temp }}/mygpt-test
+        run: |
+          npm install --prefix "${RUNNER_TEMP}/browser-tests" --no-save --package-lock=false playwright@1.51.1
+          node "${PLAYWRIGHT_MODULE}/cli.js" install --with-deps chromium
+          go build -o "${MYGPT_TEST_BINARY}" ./cmd/mygpt-test
+          node tests/browser.mjs
+          node tests/auth-browser.mjs
+
   version:
     name: Select version
     needs: test
