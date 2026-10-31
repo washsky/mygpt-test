@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {html,source,accountHTML} from './embedded.mjs';
 
 class Element {
- constructor(tag='div',text='',className=''){this.tag=tag;this.textContent=text;this.className=className;this.children=[];this.attributes={};this.value='';this.options=[];this.classes=new Set();this.classList={add:x=>this.classes.add(x),remove:x=>this.classes.delete(x),toggle:(x,on)=>on?this.classes.add(x):this.classes.delete(x)};}
+ constructor(tag='div',text='',className=''){this.tag=tag;this.textContent=text;this.className=className;this.children=[];this.attributes={};this.dataset={};this.value='';this.checked=false;this.options=[];this.classes=new Set();this.classList={add:x=>this.classes.add(x),remove:x=>this.classes.delete(x),toggle:(x,on)=>on?this.classes.add(x):this.classes.delete(x)};}
  append(...nodes){for(const node of nodes){if(node.tag==='fragment')this.children.push(...node.children);else this.children.push(node)}}
  prepend(...nodes){this.children.unshift(...nodes)}
  replaceChildren(...nodes){this.children=[];this.textContent='';this.append(...nodes)}

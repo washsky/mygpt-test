@@ -31,9 +31,19 @@ try{
  await page.locator('#login [name=username]').fill('browseruser');await page.locator('#login [name=password]').fill(memberPassword);await page.locator('#login button').click();
  await page.locator('#signed-in').waitFor();assert.match(await page.locator('#identity').textContent(),/browseruser/);
  await page.goto(base+'/');await page.locator('#compose-link').click();await page.locator('#post-author[readonly]').waitFor();
- await page.locator('#post-title').fill('账户笔记');await page.locator('#post-body').fill('浏览器实际发布');await page.locator('#post-form button[type=submit]').click();
+ await page.locator('#post-title').fill('账户笔记');await page.locator('#post-body').fill('## 浏览器实际发布\n\n**粗体正文**\n\n| 名称 | 数值 |\n|---|---|\n| A | 1 |');await page.locator('#post-markdown').check();await page.locator('#post-form button[type=submit]').click();
  await page.locator('#detail-title').filter({hasText:'账户笔记'}).waitFor();assert.match(await page.locator('#detail-meta').textContent(),/browseruser · UID 2 · 注册用户/);
- await page.locator('#reply-body').fill('账户回复');await page.locator('#reply-form button[type=submit]').click();await page.locator('.reply').filter({hasText:'账户回复'}).waitFor();
+ await page.locator('#detail-body .markdown-rendered h2').filter({hasText:'浏览器实际发布'}).waitFor();
+ const markdownPostID=await page.evaluate(()=>location.hash.slice(6));
+ await page.locator('#reply-body').fill('### 账户回复\n\n- [x] 已完成\n\n~~旧内容~~');await page.locator('#reply-markdown').check();await page.locator('#reply-form button[type=submit]').click();await page.locator('.reply').filter({hasText:'账户回复'}).waitFor();
+ // Edit each saved format through the real API and keep the original source.
+ await page.locator('.reply .markdown-rendered h3').filter({hasText:'账户回复'}).waitFor();
+ assert.equal(await page.locator('.reply .markdown-rendered input[type=checkbox]').isDisabled(),true);
+ await page.locator('#post-tools summary').click();await page.getByRole('button',{name:'编辑帖子',exact:true}).click();await page.locator('#edit-dialog').waitFor();assert.equal(await page.locator('#edit-markdown').isChecked(),true);
+ await page.locator('#edit-markdown').uncheck();await page.locator('#edit-dialog button[value=save]').click();await page.locator('#detail-body:not(.markdown-body)').waitFor();assert.match(await page.locator('#detail-body').textContent(),/## 浏览器实际发布/);
+ await page.locator('#post-tools summary').click();await page.getByRole('button',{name:'编辑帖子',exact:true}).click();await page.locator('#edit-markdown').check();await page.locator('#edit-dialog button[value=save]').click();await page.locator('#detail-body .markdown-rendered h2').waitFor();
+ await page.locator('.reply .action-menu>summary').click();await page.getByRole('button',{name:'编辑回复',exact:true}).click();assert.equal(await page.locator('#edit-markdown').isChecked(),true);
+ await page.locator('#edit-markdown').uncheck();await page.locator('#edit-dialog button[value=save]').click();await page.locator('.reply .body:not(.markdown-body)').waitFor();assert.match(await page.locator('.reply .body').textContent(),/### 账户回复/);
  await page.goto(base+'/files');await page.locator('#workspace-account').filter({hasText:'browseruser'}).waitFor();
  const input=page.locator('input[type=file]');await input.setInputFiles({name:'account-upload.txt',mimeType:'text/plain',buffer:Buffer.from('authenticated upload')});
  // The file page uses XHR; its CSRF header must be tested separately from fetch.
@@ -42,7 +52,7 @@ try{
  await page.goto(base+'/');await page.locator('#posts[aria-busy=false]').waitFor();assert.equal(await page.locator('#post-author').getAttribute('readonly'),null);
  await page.goto(base+'/account');
  await page.locator('#login [name=username]').fill('siteowner');await page.locator('#login [name=password]').fill(ownerPassword);await page.locator('#login button').click();await page.locator('#management').waitFor();await page.locator('#users button').filter({hasText:'停用'}).click();await page.getByText('browseruser · UID 2 · 已停用',{exact:true}).waitFor();
- await page.goto(base+'/#settings');await page.locator('#guest-posts').uncheck();await page.locator('#guest-uploads').uncheck();await page.locator('#settings-form button[type=submit]').click();await page.locator('#settings-message').filter({hasText:'已保存'}).waitFor();
+ await page.goto(base+'/#settings');await page.locator('#guest-posts').uncheck();await page.locator('#guest-uploads').uncheck();await page.locator('#feature-line_numbers').check();await page.locator('#feature-line_copy').check();await page.locator('#resource-rendering').check();await page.locator('#settings-form button[type=submit]').click();await page.locator('#settings-message').filter({hasText:'已保存'}).waitFor();
  // Saving each appearance combination must preserve every existing setting.
  const beforeAppearance=await page.evaluate(()=>fetch('/api/forum/settings').then(r=>r.json()));
  for(const avatars of [false,true])for(const bubble of [false,true])for(const replyBubble of [false,true]){
@@ -54,6 +64,22 @@ try{
   const actual=await page.evaluate(()=>fetch('/api/forum/settings').then(r=>r.json()));
   assert.deepEqual(actual,{...beforeAppearance,enable_list_avatars:avatars,enable_body_bubble:bubble,enable_reply_bubble:replyBubble});
  }
+ // Defaults only affect future composer choices, not saved post/reply formats.
+ const beforeDefaults=await page.evaluate(()=>fetch('/api/forum/settings').then(r=>r.json()));
+ for(const postDefault of [false,true])for(const replyDefault of [false,true]){
+  await page.locator('#default-post-markdown').setChecked(postDefault);await page.locator('#default-reply-markdown').setChecked(replyDefault);
+  const saved=page.waitForResponse(r=>r.url()===base+'/api/forum/settings'&&r.request().method()==='PUT');
+  await page.locator('#settings-form button[type=submit]').click();assert.equal((await saved).status(),200);
+  await page.reload();await page.locator('#posts[aria-busy=false]').waitFor({state:'attached'});
+  const actual=await page.evaluate(()=>fetch('/api/forum/settings').then(r=>r.json()));
+  assert.deepEqual(actual,{...beforeDefaults,default_post_markdown:postDefault,default_reply_markdown:replyDefault});
+ }
+ const savedMarkdownPost=await page.evaluate(id=>fetch('/api/forum/posts/'+id).then(r=>r.json()),markdownPostID);
+ assert.equal(savedMarkdownPost.markdown,true);assert.equal(savedMarkdownPost.replies[0].markdown,false);
+ await page.goto(base+'/#post/'+markdownPostID);await page.locator('#detail-body .markdown-rendered table').waitFor();await page.locator('#detail-body .markdown-source-tools>summary').click();
+ assert.equal(await page.locator('#detail-body .markdown-source-lines .line-copy').count(),savedMarkdownPost.body.split('\n').length);
+ for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Markdown layout overflow at '+width)}
+ if(process.env.MARKDOWN_SCREENSHOT_PREFIX){await page.setViewportSize({width:390,height:900});await page.locator('#detail-title').scrollIntoViewIfNeeded();await page.screenshot({path:process.env.MARKDOWN_SCREENSHOT_PREFIX+'-real.png'})}
  assert.deepEqual(errors,[]);await context.close();console.log('Auth browser smoke passed: registration, login, member post/reply, XHR upload, logout, first-user admin, sequential UIDs, user disable, settings, short and long passwords, dropdown topic creation.');
 }finally{
  if(browser)await browser.close();server.kill('SIGTERM');await new Promise(r=>server.once('exit',r));await rm(root,{recursive:true,force:true});

@@ -14,6 +14,9 @@ const topics=[{id:'a',name:'日常记录',description:'生活'},{id:'b',name:'�
 const post=id=>({id,title:'给未来的自己留一份记录 · '+id,author:'访客',topic_id:'a',created_at:'2026-01-01T12:00:00Z',reply_count:0,body:'这一篇笔记记录生活与技术。\n'+('文字与长链接 https://example.com/ '+ 'a'.repeat(120)+'\n').repeat(6),replies:[],attachments:[]});
 const imageID='a'.repeat(32),replyID='c'.repeat(32);
 const appearancePost={...post('appearance'),author:'long_account_name_123456789012345',user_id:'author-id',user_uid:12345,client_info:{browser:'Chromium',os:'Linux'},body:'正文的第一行。\n> 一段引用文字。\n引用回复：/#reply/'+replyID+'\n![图片](/api/files/'+imageID+'/preview)\n[附件下载](/api/files/'+imageID+')\n'+('long_text_'.repeat(40)),attachments:[{id:imageID,name:'inline.png',content_type:'image/png',download_url:'/api/files/'+imageID}],replies:[{id:replyID,author:'回复者',created_at:'2026-01-01T13:00:00Z',body:'引用回复功能与正文边框独立。',attachments:[]}]};
+const markdownBody='## Markdown 标题\n\n**粗体**与 *斜体* ~~删除线~~\n\n| 列一 | 列二 |\n|---|---|\n| 长表格内容 | '+('cell'.repeat(50))+' |\n\n~~~go\n'+('code_'.repeat(60))+'\n~~~\n\n> 引用\n\n- [x] 完成\n\n![图片](/api/files/'+imageID+'/preview)';
+const markdownHTML='<h2 id="markdown-title">Markdown 标题</h2><p><strong>粗体</strong>与 <em>斜体</em> <del>删除线</del></p><table><thead><tr><th>列一</th><th>列二</th></tr></thead><tbody><tr><td>长表格内容</td><td>'+('cell'.repeat(50))+'</td></tr></tbody></table><pre><code class="language-go">'+('code_'.repeat(60))+'</code></pre><blockquote><p>引用</p></blockquote><ul><li><input type="checkbox" disabled checked>完成</li></ul><p><img alt="图片" src="/api/files/'+imageID+'/preview"></p><p><a href="#markdown-title">返回标题</a></p>';
+const markdownPost={...post('markdown'),markdown:true,body:markdownBody,body_html:markdownHTML,replies:[{id:replyID,author:'回复者',created_at:'2026-01-01T13:00:00Z',body:markdownBody,markdown:true,body_html:markdownHTML,attachments:[]}]};
 appearancePost.replies[0].attachments=appearancePost.attachments;
 let listCalls=0,failList=false,slow=false,failDetail=false,settingsDelay=0,failSettings=false,fixtureUser=null,authDelay=0;
 await page.route('http://blog.test/**',async route=>{
@@ -35,7 +38,7 @@ await page.route('http://blog.test/**',async route=>{
   const id=url.pathname.split('/').pop();
   if(id==='slow')await new Promise(resolve=>setTimeout(resolve,300));
   if(failDetail)return route.fulfill({status:404,body:'not found'});
-  body=id==='appearance'?appearancePost:post(id);
+  body=id==='markdown'?markdownPost:id==='appearance'?appearancePost:post(id);
  }else body={items:[]};
  return route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
 });
@@ -148,6 +151,42 @@ try{
    await page.locator('.reply').first().scrollIntoViewIfNeeded();await page.screenshot({path:process.env.FORUM_SCREENSHOT_PREFIX+'-reply-'+theme+'-'+bubble+'.png'});
   }
  }
+ // Markdown is rendered as one document; source-line controls cannot split its blocks.
+ for(const [key,value] of Object.entries({enable_line_numbers:false,enable_line_copy:false,default_post_markdown:false,default_reply_markdown:false}))settings[key]=value;
+ await page.goto('http://blog.test/#post/markdown');await page.locator('#detail-body .markdown-rendered h2').waitFor();
+ for(const width of [320,390,768,1440]){
+  await page.setViewportSize({width,height:900});
+  for(let mask=0;mask<16;mask++){
+   Object.assign(settings,{enable_line_numbers:!!(mask&1),enable_line_copy:!!(mask&2),enable_resource_rendering:!!(mask&4),enable_body_bubble:!!(mask&8),enable_reply_bubble:!(mask&8)});
+   await page.evaluate(async()=>{await loadSettings();await showPost('markdown')});
+   assert.equal(await page.locator('#detail-body .markdown-rendered table').count(),1);assert.equal(await page.locator('.reply .markdown-rendered table').count(),1);
+   assert.equal(await page.locator('#detail-body .markdown-rendered pre code').textContent(),'code_'.repeat(60));
+   assert.equal(await page.locator('#detail-body .markdown-rendered input').isDisabled(),true);
+   assert.equal(await page.locator('#detail-body .markdown-source-tools').count(),mask&3?1:0);
+   assert.equal(await page.locator('#detail-body .markdown-source-lines .line-number').count(),mask&1?markdownBody.split('\n').length:0);
+   assert.equal(await page.locator('#detail-body .markdown-source-lines .line-copy').count(),mask&2?markdownBody.split('\n').length:0);
+   assert.equal(await page.locator('#detail-body .markdown-source-lines a').count(),0);
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Markdown overflow at '+width+'/'+mask);
+  }
+ }
+ await page.setViewportSize({width:390,height:900});
+ const markdownHash=await page.evaluate(()=>location.hash);
+ await page.locator('#detail-body .markdown-rendered').getByRole('link',{name:'返回标题',exact:true}).click();assert.equal(await page.evaluate(()=>location.hash),markdownHash);
+ const allMarkdownIDs=await page.locator('.markdown-rendered [id]').evaluateAll(els=>els.map(el=>el.id));assert.equal(new Set(allMarkdownIDs).size,allMarkdownIDs.length);
+ await page.locator('#detail-body .markdown-source-tools>summary').click();
+ await page.evaluate(()=>{window.workspaceShareText=async value=>{window.copiedMarkdownLine=value;return false}});
+ await page.locator('#detail-body .markdown-source-lines .line-copy').first().click();await page.waitForFunction(()=>window.copiedMarkdownLine==='## Markdown 标题');
+ assert.deepEqual(await page.locator('#detail-body .markdown-source-lines .line-text').allTextContents(),markdownBody.split('\n'));
+ if(process.env.FORUM_SCREENSHOT_PREFIX)await page.screenshot({path:process.env.FORUM_SCREENSHOT_PREFIX+'-markdown.png'});
+ // A restored draft keeps its explicit choice even if site defaults change.
+ settings.default_post_markdown=true;settings.default_reply_markdown=true;
+ await page.evaluate(()=>localStorage.removeItem('workspace-post-draft'));await page.goto('http://blog.test/#compose');await page.reload();await page.locator('#post-title').waitFor();
+ assert.equal(await page.locator('#post-markdown').isChecked(),true);
+ await page.locator('#post-markdown').uncheck();await page.locator('#post-body').fill('## 保留纯文本草稿');await page.waitForTimeout(350);await page.reload();await page.locator('#post-title').waitFor();
+ assert.equal(await page.locator('#post-markdown').isChecked(),false);
+ await page.evaluate(()=>loadSettings());assert.equal(await page.locator('#post-markdown').isChecked(),false);
+ await page.goto('http://blog.test/#post/markdown');await page.locator('#reply-markdown').waitFor();assert.equal(await page.locator('#reply-markdown').isChecked(),true);
+ await page.locator('#reply-markdown').uncheck();await page.evaluate(()=>loadSettings());assert.equal(await page.locator('#reply-markdown').isChecked(),false);
  for(const key of Object.keys(settings))delete settings[key];Object.assign(settings,originalSettings);
  await page.setViewportSize({width:1440,height:1000});await page.goto('http://blog.test/#post/1');await page.locator('#detail-title').filter({hasText:' · 1'}).waitFor();
  // Missing articles clear old metadata rather than presenting stale content.
@@ -210,5 +249,5 @@ try{
  await page.locator('#compose-back').click();await page.locator('#feed').waitFor();
  await page.locator('.post-link').first().click();await page.getByText('暂时无法打开内容',{exact:true}).waitFor();assert.equal(await page.locator('#feed').isVisible(),false);
  assert.deepEqual(errors,[]);
- console.log('PASS: independent appearance switches, compact avatars, 64 line/quote/resource and independent post/reply bubble combinations; post-focused responsive feed, separate composer, retained drafts and guest publishing permission; fixed mobile menu cells across labels, pages and selection; stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
+ console.log('PASS: Markdown documents, responsive tables and code, source line controls, stable composer defaults and draft formats; independent appearance switches, compact avatars, 64 line/quote/resource and independent post/reply bubble combinations; post-focused responsive feed, separate composer, retained drafts and guest publishing permission; fixed mobile menu cells across labels, pages and selection; stable clipboard entry across navigation and settings delays; topic dropdown navigation, filtering, keyboard and responsive layout; pagination, retry, search, drafts, navigation races, theme, responsive layout, missing articles; no browser errors');
 }finally{await browser.close()}

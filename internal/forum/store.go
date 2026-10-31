@@ -29,6 +29,8 @@ type Settings struct {
  ClientDevice bool `json:"client_device"`
  ClientLanguage bool `json:"client_language"`
  ClientTimezone bool `json:"client_timezone"`
+ DefaultPostMarkdown bool `json:"default_post_markdown"`
+ DefaultReplyMarkdown bool `json:"default_reply_markdown"`
  EnableListAvatars bool `json:"enable_list_avatars"`
  EnableBodyBubble bool `json:"enable_body_bubble"`
  EnableReplyBubble bool `json:"enable_reply_bubble"`
@@ -64,6 +66,8 @@ type ClientInfo struct {
 }
 
 type Post struct {
+ Markdown bool `json:"markdown"`
+ BodyHTML string `json:"body_html,omitempty"`
  UserUID int64 `json:"user_uid,omitempty"`
  UserID string `json:"user_id,omitempty"`
  ClientInfo ClientInfo `json:"client_info"`
@@ -80,6 +84,8 @@ type Post struct {
 }
 
 type Reply struct {
+ Markdown bool `json:"markdown"`
+ BodyHTML string `json:"body_html,omitempty"`
  UserUID int64 `json:"user_uid,omitempty"`
  UserID string `json:"user_id,omitempty"`
  ClientInfo ClientInfo `json:"client_info"`
@@ -140,6 +146,7 @@ func Open(dir string, files filemanager.Store) (*Store, error) {
 	} {
 		if _, err = db.Exec(statement); err != nil { db.Close(); return nil, fmt.Errorf("initialize forum catalog: %w", err) }
 	}
+	if err := ensureColumn(db, "post_index", "markdown"); err != nil { db.Close(); return nil, err }
 	if err := ensureColumn(db, "post_index", "deleted_at"); err != nil { db.Close(); return nil, fmt.Errorf("upgrade forum catalog: %w", err) }
 	for _, table := range []string{"post_index", "reply_index"} { if err := ensureColumn(db, table, "user_id"); err != nil {db.Close(); return nil, err} }
  if _, err = db.Exec("CREATE INDEX IF NOT EXISTS posts_by_topic_active ON post_index(topic_id, deleted_at, created_at DESC)"); err != nil { db.Close(); return nil, err }
@@ -164,7 +171,7 @@ func ensureColumn(db *sql.DB, table, column string) error {
 	}
 	if err := rows.Err(); err != nil { rows.Close(); return err }
 	if err := rows.Close(); err != nil { return err }
-	if !found { _, err = db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " TEXT") }
+	if !found { definition:=" TEXT";if column=="markdown"{definition=" INTEGER NOT NULL DEFAULT 0"};_, err = db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + definition) }
 	return err
 }
 
@@ -184,7 +191,7 @@ func (s *Store) Settings() (Settings, error) {
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil { return v, err }
-		switch key { case "enable_list_avatars": v.EnableListAvatars=value=="true"; case "enable_body_bubble": v.EnableBodyBubble=value=="true"; case "enable_reply_bubble": v.EnableReplyBubble=value=="true"; case "allow_registration": v.AllowRegistration=value=="true"; case "allow_guest_uploads": v.AllowGuestUploads=value=="true"; case "allow_guest_clipboard": v.AllowGuestClipboard=value=="true"; case "enable_client_info": v.EnableClientInfo=value=="true"; case "client_browser": v.ClientBrowser=value=="true"; case "client_os": v.ClientOS=value=="true"; case "client_device": v.ClientDevice=value=="true"; case "client_language": v.ClientLanguage=value=="true"; case "client_timezone": v.ClientTimezone=value=="true"; case "enable_quote_replies": v.EnableQuoteReplies=value=="true"; case "enable_line_numbers": v.EnableLineNumbers=value=="true"; case "enable_line_copy": v.EnableLineCopy=value=="true"; case "enable_clipboard": v.EnableClipboard=value=="true"; case "clipboard_ttl_minutes": fmt.Sscan(value,&v.ClipboardTTLMinutes); case "enable_realtime": v.EnableRealtime=value=="true"; case "enable_network_resilience": v.EnableNetworkResilience=value=="true"; case "title": v.Title=value; case "description": v.Description=value; case "allow_guest_posts": v.AllowGuestPosts=value=="true"; case "allow_guest_replies": v.AllowGuestReplies=value=="true"; case "enable_resource_rendering": v.EnableResourceRendering=value=="true"; case "enable_search": v.EnableSearch=value=="true" }
+		switch key { case "default_post_markdown": v.DefaultPostMarkdown=value=="true"; case "default_reply_markdown": v.DefaultReplyMarkdown=value=="true"; case "enable_list_avatars": v.EnableListAvatars=value=="true"; case "enable_body_bubble": v.EnableBodyBubble=value=="true"; case "enable_reply_bubble": v.EnableReplyBubble=value=="true"; case "allow_registration": v.AllowRegistration=value=="true"; case "allow_guest_uploads": v.AllowGuestUploads=value=="true"; case "allow_guest_clipboard": v.AllowGuestClipboard=value=="true"; case "enable_client_info": v.EnableClientInfo=value=="true"; case "client_browser": v.ClientBrowser=value=="true"; case "client_os": v.ClientOS=value=="true"; case "client_device": v.ClientDevice=value=="true"; case "client_language": v.ClientLanguage=value=="true"; case "client_timezone": v.ClientTimezone=value=="true"; case "enable_quote_replies": v.EnableQuoteReplies=value=="true"; case "enable_line_numbers": v.EnableLineNumbers=value=="true"; case "enable_line_copy": v.EnableLineCopy=value=="true"; case "enable_clipboard": v.EnableClipboard=value=="true"; case "clipboard_ttl_minutes": fmt.Sscan(value,&v.ClipboardTTLMinutes); case "enable_realtime": v.EnableRealtime=value=="true"; case "enable_network_resilience": v.EnableNetworkResilience=value=="true"; case "title": v.Title=value; case "description": v.Description=value; case "allow_guest_posts": v.AllowGuestPosts=value=="true"; case "allow_guest_replies": v.AllowGuestReplies=value=="true"; case "enable_resource_rendering": v.EnableResourceRendering=value=="true"; case "enable_search": v.EnableSearch=value=="true" }
 	}
 	return v, rows.Err()
 }
@@ -195,7 +202,7 @@ func (s *Store) SaveSettings(v Settings) error {
 	if len(v.Title)<1 || len(v.Title)>100 || len(v.Description)>500 { return fmt.Errorf("站点名称需在 1–100 字节，简介不超过 500 字节") }
 	s.mu.Lock(); defer s.mu.Unlock()
 	tx, err := s.catalog.Begin(); if err != nil { return err }; defer tx.Rollback()
-	values := map[string]string{"enable_list_avatars":fmt.Sprint(v.EnableListAvatars), "enable_body_bubble":fmt.Sprint(v.EnableBodyBubble), "enable_reply_bubble":fmt.Sprint(v.EnableReplyBubble), "allow_registration":fmt.Sprint(v.AllowRegistration), "allow_guest_uploads":fmt.Sprint(v.AllowGuestUploads), "allow_guest_clipboard":fmt.Sprint(v.AllowGuestClipboard), "enable_client_info":fmt.Sprint(v.EnableClientInfo), "client_browser":fmt.Sprint(v.ClientBrowser), "client_os":fmt.Sprint(v.ClientOS), "client_device":fmt.Sprint(v.ClientDevice), "client_language":fmt.Sprint(v.ClientLanguage), "client_timezone":fmt.Sprint(v.ClientTimezone), "enable_quote_replies":fmt.Sprint(v.EnableQuoteReplies), "enable_line_numbers":fmt.Sprint(v.EnableLineNumbers), "enable_line_copy":fmt.Sprint(v.EnableLineCopy), "enable_clipboard":fmt.Sprint(v.EnableClipboard), "clipboard_ttl_minutes":fmt.Sprint(v.ClipboardTTLMinutes), "enable_realtime":fmt.Sprint(v.EnableRealtime), "enable_network_resilience":fmt.Sprint(v.EnableNetworkResilience), "title":v.Title, "description":v.Description, "allow_guest_posts":fmt.Sprint(v.AllowGuestPosts), "allow_guest_replies":fmt.Sprint(v.AllowGuestReplies), "enable_resource_rendering":fmt.Sprint(v.EnableResourceRendering), "enable_search":fmt.Sprint(v.EnableSearch)}
+	values := map[string]string{"default_post_markdown":fmt.Sprint(v.DefaultPostMarkdown), "default_reply_markdown":fmt.Sprint(v.DefaultReplyMarkdown), "enable_list_avatars":fmt.Sprint(v.EnableListAvatars), "enable_body_bubble":fmt.Sprint(v.EnableBodyBubble), "enable_reply_bubble":fmt.Sprint(v.EnableReplyBubble), "allow_registration":fmt.Sprint(v.AllowRegistration), "allow_guest_uploads":fmt.Sprint(v.AllowGuestUploads), "allow_guest_clipboard":fmt.Sprint(v.AllowGuestClipboard), "enable_client_info":fmt.Sprint(v.EnableClientInfo), "client_browser":fmt.Sprint(v.ClientBrowser), "client_os":fmt.Sprint(v.ClientOS), "client_device":fmt.Sprint(v.ClientDevice), "client_language":fmt.Sprint(v.ClientLanguage), "client_timezone":fmt.Sprint(v.ClientTimezone), "enable_quote_replies":fmt.Sprint(v.EnableQuoteReplies), "enable_line_numbers":fmt.Sprint(v.EnableLineNumbers), "enable_line_copy":fmt.Sprint(v.EnableLineCopy), "enable_clipboard":fmt.Sprint(v.EnableClipboard), "clipboard_ttl_minutes":fmt.Sprint(v.ClipboardTTLMinutes), "enable_realtime":fmt.Sprint(v.EnableRealtime), "enable_network_resilience":fmt.Sprint(v.EnableNetworkResilience), "title":v.Title, "description":v.Description, "allow_guest_posts":fmt.Sprint(v.AllowGuestPosts), "allow_guest_replies":fmt.Sprint(v.AllowGuestReplies), "enable_resource_rendering":fmt.Sprint(v.EnableResourceRendering), "enable_search":fmt.Sprint(v.EnableSearch)}
 	for key, value := range values { if _, err := tx.Exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",key,value); err != nil { return err } }
 	return tx.Commit()
 }
@@ -244,6 +251,7 @@ func (s *Store) openShard(key string) (*sql.DB,error) {
 	} {
 		if _,err=db.Exec(statement); err!=nil {db.Close();return nil,err}
 	}
+	if err := ensureColumn(db, "replies", "markdown"); err != nil { db.Close(); return nil, err }
 	if err := ensureColumn(db, "replies", "deleted_at"); err != nil { db.Close(); return nil, err }
  for _,table:=range []string{"posts","replies"}{if err:=ensureColumn(db,table,"client_info");err!=nil{db.Close();return nil,err}}
 	return db,nil
@@ -253,29 +261,29 @@ func (s *Store) CreatePost(topicID,title,body,author string) (Post,error) { retu
 
 func (s *Store) CreatePostWithClient(topicID,title,body,author string,client ClientInfo) (Post,error) { return s.CreatePostForUser(topicID,title,body,author,"",client) }
 
-func (s *Store) CreatePostForUser(topicID,title,body,author,userID string,client ClientInfo) (Post,error) {
+func (s *Store) CreatePostForUser(topicID,title,body,author,userID string,client ClientInfo,markdown ...bool) (Post,error) {
 	title=strings.TrimSpace(title);body=strings.TrimSpace(body);author=strings.TrimSpace(author)
 	if len(title)<1||len(title)>200||len(body)<1||len(body)>100000||len(author)<1||len(author)>80 {return Post{},fmt.Errorf("标题、正文或署名长度无效")}
 	var exists int
 	if err:=s.catalog.QueryRow("SELECT 1 FROM topics WHERE id=?",topicID).Scan(&exists);err!=nil {if errors.Is(err,sql.ErrNoRows){return Post{},ErrNotFound};return Post{},err}
 	id,err:=newID();if err!=nil{return Post{},err}
 	now:=time.Now().UTC();key:=now.Format("2006-01")
-	v:=Post{UserID:userID,ID:id,TopicID:topicID,Title:title,Body:body,Author:author,ClientInfo:client,CreatedAt:now.Format(time.RFC3339Nano),Attachments:[]filemanager.File{},Replies:[]Reply{}}
+	v:=Post{Markdown:len(markdown)>0&&markdown[0],UserID:userID,ID:id,TopicID:topicID,Title:title,Body:body,Author:author,ClientInfo:client,CreatedAt:now.Format(time.RFC3339Nano),Attachments:[]filemanager.File{},Replies:[]Reply{}}
 	s.mu.Lock();defer s.mu.Unlock()
 	shard,err:=s.openShard(key);if err!=nil{return Post{},err};defer shard.Close()
 	info,_:=json.Marshal(client)
  if _,err=shard.Exec("INSERT INTO posts(id,body,client_info) VALUES(?,?,?)",id,body,string(info));err!=nil{return Post{},err}
-	if _,err=s.catalog.Exec("INSERT INTO post_index(id,topic_id,title,author,created_at,shard,user_id) VALUES(?,?,?,?,?,?,?)",id,topicID,title,author,v.CreatedAt,key,userID);err!=nil {shard.Exec("DELETE FROM posts WHERE id=?",id);return Post{},err}
+	if _,err=s.catalog.Exec("INSERT INTO post_index(id,topic_id,title,author,created_at,shard,user_id,markdown) VALUES(?,?,?,?,?,?,?,?)",id,topicID,title,author,v.CreatedAt,key,userID,v.Markdown);err!=nil {shard.Exec("DELETE FROM posts WHERE id=?",id);return Post{},err}
 	return v,nil
 }
 
 func (s *Store) Posts(topicID string,limit,offset int) ([]Post,error) {
 	if limit<1||limit>50 {limit=20};if offset<0||offset>100000 {offset=0}
-	query:="SELECT id,topic_id,title,author,created_at,reply_count,COALESCE(user_id,'') FROM post_index WHERE deleted_at IS NULL"
+	query:="SELECT id,topic_id,title,author,created_at,reply_count,COALESCE(user_id,''),markdown FROM post_index WHERE deleted_at IS NULL"
 	args:=[]any{};if topicID!="" {query+=" AND topic_id=?";args=append(args,topicID)}
 	query+=" ORDER BY created_at DESC LIMIT ? OFFSET ?";args=append(args,limit,offset)
 	rows,err:=s.catalog.Query(query,args...);if err!=nil{return nil,err};defer rows.Close()
-	out:=[]Post{};for rows.Next(){var v Post;if err:=rows.Scan(&v.ID,&v.TopicID,&v.Title,&v.Author,&v.CreatedAt,&v.ReplyCount,&v.UserID);err!=nil{return nil,err};out=append(out,v)}
+	out:=[]Post{};for rows.Next(){var v Post;if err:=rows.Scan(&v.ID,&v.TopicID,&v.Title,&v.Author,&v.CreatedAt,&v.ReplyCount,&v.UserID,&v.Markdown);err!=nil{return nil,err};out=append(out,v)}
 	return out,rows.Err()
 }
 
@@ -297,7 +305,7 @@ func (s *Store) SearchPosts(query,topicID string,limit,offset int) ([]Post,error
 	defer s.mu.Unlock()
 	for _, key := range shards {
 		err := s.withShardTx(key, func(tx *sql.Tx) error {
-			statement := "SELECT p.id,p.topic_id,p.title,p.author,p.created_at,p.reply_count,b.body,COALESCE(p.user_id,'') FROM post_index p JOIN forum_shard.posts b ON b.id=p.id WHERE p.shard=? AND p.deleted_at IS NULL AND (p.title LIKE ? ESCAPE '\\' OR p.author LIKE ? ESCAPE '\\' OR b.body LIKE ? ESCAPE '\\')"
+			statement := "SELECT p.id,p.topic_id,p.title,p.author,p.created_at,p.reply_count,b.body,COALESCE(p.user_id,''),p.markdown FROM post_index p JOIN forum_shard.posts b ON b.id=p.id WHERE p.shard=? AND p.deleted_at IS NULL AND (p.title LIKE ? ESCAPE '\\' OR p.author LIKE ? ESCAPE '\\' OR b.body LIKE ? ESCAPE '\\')"
 			args := []any{key,pattern,pattern,pattern}
 			if topicID != "" { statement += " AND p.topic_id=?"; args = append(args,topicID) }
 			matches, err := tx.Query(statement,args...)
@@ -305,7 +313,7 @@ func (s *Store) SearchPosts(query,topicID string,limit,offset int) ([]Post,error
 			defer matches.Close()
 			for matches.Next() {
 				var post Post
-				if err := matches.Scan(&post.ID,&post.TopicID,&post.Title,&post.Author,&post.CreatedAt,&post.ReplyCount,&post.Body,&post.UserID); err != nil { return err }
+				if err := matches.Scan(&post.ID,&post.TopicID,&post.Title,&post.Author,&post.CreatedAt,&post.ReplyCount,&post.Body,&post.UserID,&post.Markdown); err != nil { return err }
 				post.Attachments = []filemanager.File{}
 				post.Replies = []Reply{}
 				found = append(found, post)
@@ -323,16 +331,16 @@ func (s *Store) SearchPosts(query,topicID string,limit,offset int) ([]Post,error
 
 func (s *Store) Post(id string) (Post,error) {
 	var v Post;var key string
-	err:=s.catalog.QueryRow("SELECT id,topic_id,title,author,created_at,reply_count,shard,COALESCE(user_id,'') FROM post_index WHERE id=? AND deleted_at IS NULL",id).Scan(&v.ID,&v.TopicID,&v.Title,&v.Author,&v.CreatedAt,&v.ReplyCount,&key,&v.UserID)
+	err:=s.catalog.QueryRow("SELECT id,topic_id,title,author,created_at,reply_count,shard,COALESCE(user_id,''),markdown FROM post_index WHERE id=? AND deleted_at IS NULL",id).Scan(&v.ID,&v.TopicID,&v.Title,&v.Author,&v.CreatedAt,&v.ReplyCount,&key,&v.UserID,&v.Markdown)
 	if errors.Is(err,sql.ErrNoRows){return v,ErrNotFound};if err!=nil{return v,err}
 	shard,err:=s.openShard(key);if err!=nil{return v,err};defer shard.Close()
 	var postInfo sql.NullString
  if err=shard.QueryRow("SELECT body,client_info FROM posts WHERE id=?",id).Scan(&v.Body,&postInfo);err!=nil{return v,err}
  if postInfo.Valid{_ = json.Unmarshal([]byte(postInfo.String),&v.ClientInfo)}
 	v.Attachments,err=s.attachments("post",id);if err!=nil{return v,err}
-	rows,err:=shard.Query("SELECT id,post_id,author,body,created_at,client_info FROM replies WHERE post_id=? AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 500",id);if err!=nil{return v,err}
+	rows,err:=shard.Query("SELECT id,post_id,author,body,created_at,client_info,markdown FROM replies WHERE post_id=? AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 500",id);if err!=nil{return v,err}
 	v.Replies=[]Reply{}
-	for rows.Next(){var reply Reply;var info sql.NullString;if err=rows.Scan(&reply.ID,&reply.PostID,&reply.Author,&reply.Body,&reply.CreatedAt,&info);err!=nil{rows.Close();return v,err};if info.Valid{_ = json.Unmarshal([]byte(info.String),&reply.ClientInfo)};v.Replies=append(v.Replies,reply)}
+	for rows.Next(){var reply Reply;var info sql.NullString;if err=rows.Scan(&reply.ID,&reply.PostID,&reply.Author,&reply.Body,&reply.CreatedAt,&info,&reply.Markdown);err!=nil{rows.Close();return v,err};if info.Valid{_ = json.Unmarshal([]byte(info.String),&reply.ClientInfo)};v.Replies=append(v.Replies,reply)}
 	err=rows.Err();rows.Close();if err!=nil{return v,err}
 	for i:=range v.Replies {v.Replies[i].UserID,err=s.AuthorID("reply",v.Replies[i].ID);if err!=nil{return v,err};v.Replies[i].Attachments,err=s.attachments("reply",v.Replies[i].ID);if err!=nil{return v,err}}
 	return v,nil
@@ -342,17 +350,17 @@ func (s *Store) CreateReply(postID,body,author string) (Reply,error) { return s.
 
 func (s *Store) CreateReplyWithClient(postID,body,author string,client ClientInfo) (Reply,error) { return s.CreateReplyForUser(postID,body,author,"",client) }
 
-func (s *Store) CreateReplyForUser(postID,body,author,userID string,client ClientInfo) (Reply,error) {
+func (s *Store) CreateReplyForUser(postID,body,author,userID string,client ClientInfo,markdown ...bool) (Reply,error) {
 	body=strings.TrimSpace(body);author=strings.TrimSpace(author)
 	if len(body)<1||len(body)>20000||len(author)<1||len(author)>80{return Reply{},fmt.Errorf("回复或署名长度无效")}
 	var key string
 	if err:=s.catalog.QueryRow("SELECT shard FROM post_index WHERE id=? AND deleted_at IS NULL",postID).Scan(&key);errors.Is(err,sql.ErrNoRows){return Reply{},ErrNotFound}else if err!=nil{return Reply{},err}
 	id,err:=newID();if err!=nil{return Reply{},err}
-	v:=Reply{UserID:userID,ID:id,PostID:postID,Body:body,Author:author,ClientInfo:client,CreatedAt:time.Now().UTC().Format(time.RFC3339Nano),Attachments:[]filemanager.File{}}
+	v:=Reply{Markdown:len(markdown)>0&&markdown[0],UserID:userID,ID:id,PostID:postID,Body:body,Author:author,ClientInfo:client,CreatedAt:time.Now().UTC().Format(time.RFC3339Nano),Attachments:[]filemanager.File{}}
 	s.mu.Lock();defer s.mu.Unlock()
 	shard,err:=s.openShard(key);if err!=nil{return Reply{},err};defer shard.Close()
 	info,_:=json.Marshal(client)
- if _,err=shard.Exec("INSERT INTO replies(id,post_id,author,body,created_at,client_info) VALUES(?,?,?,?,?,?)",id,postID,author,body,v.CreatedAt,string(info));err!=nil{return Reply{},err}
+ if _,err=shard.Exec("INSERT INTO replies(id,post_id,author,body,created_at,client_info,markdown) VALUES(?,?,?,?,?,?,?)",id,postID,author,body,v.CreatedAt,string(info),v.Markdown);err!=nil{return Reply{},err}
 	tx,err:=s.catalog.Begin();if err!=nil{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},err};defer tx.Rollback()
 	if _,err=tx.Exec("INSERT INTO reply_index(id,post_id,shard,user_id) VALUES(?,?,?,?)",id,postID,key,userID);err!=nil{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},err}
 	result,err:=tx.Exec("UPDATE post_index SET reply_count=reply_count+1 WHERE id=? AND deleted_at IS NULL",postID);if err!=nil{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},err};if count,_:=result.RowsAffected();count==0{shard.Exec("DELETE FROM replies WHERE id=?",id);return Reply{},ErrNotFound}
@@ -360,7 +368,8 @@ func (s *Store) CreateReplyForUser(postID,body,author,userID string,client Clien
 	return v,nil
 }
 
-func (s *Store) UpdatePost(id, title, body string) error {
+func (s *Store) UpdatePost(id, title, body string, markdown ...bool) error {
+ var format any;if len(markdown)>0{format=markdown[0]}
 	title = strings.TrimSpace(title)
 	body = strings.TrimSpace(body)
 	if len(title) < 1 || len(title) > 200 || len(body) < 1 || len(body) > 100000 {
@@ -376,7 +385,7 @@ func (s *Store) UpdatePost(id, title, body string) error {
 		result, err := tx.Exec("UPDATE forum_shard.posts SET body=? WHERE id=?", body, id)
 		if err != nil { return err }
 		if count, _ := result.RowsAffected(); count == 0 { return ErrNotFound }
-		result, err = tx.Exec("UPDATE post_index SET title=? WHERE id=? AND deleted_at IS NULL", title, id)
+		result, err = tx.Exec("UPDATE post_index SET title=?,markdown=COALESCE(?,markdown) WHERE id=? AND deleted_at IS NULL", title, format, id)
 		if err != nil { return err }
 		if count, _ := result.RowsAffected(); count == 0 { return ErrNotFound }
 		return nil
@@ -427,7 +436,8 @@ func (s *Store) PurgePost(id string) error {
 	return s.clearFileAssociations(fileIDs)
 }
 
-func (s *Store) UpdateReply(id, body string) error {
+func (s *Store) UpdateReply(id, body string, markdown ...bool) error {
+ var format any;if len(markdown)>0{format=markdown[0]}
 	body = strings.TrimSpace(body)
 	if len(body) < 1 || len(body) > 20000 { return fmt.Errorf("回复长度无效") }
 	var shard string
@@ -435,7 +445,7 @@ func (s *Store) UpdateReply(id, body string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.withShardTx(shard, func(tx *sql.Tx) error {
-		result, err := tx.Exec("UPDATE forum_shard.replies SET body=? WHERE id=? AND deleted_at IS NULL", body, id)
+		result, err := tx.Exec("UPDATE forum_shard.replies SET body=?,markdown=COALESCE(?,markdown) WHERE id=? AND deleted_at IS NULL", body, format, id)
 		if err != nil { return err }
 		if count, _ := result.RowsAffected(); count == 0 { return ErrNotFound }
 		return nil
