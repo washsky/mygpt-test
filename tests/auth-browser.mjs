@@ -31,7 +31,7 @@ try{
  await page.locator('#login [name=username]').fill('browseruser');await page.locator('#login [name=password]').fill(memberPassword);await page.locator('#login button').click();
  await page.locator('#signed-in').waitFor();assert.match(await page.locator('#identity').textContent(),/browseruser/);
  await page.goto(base+'/');await page.locator('#compose-link').click();await page.locator('#post-author[readonly]').waitFor();
- await page.locator('#post-title').fill('账户笔记');await page.locator('#post-body').fill('## 浏览器实际发布\n\n**粗体正文**\n\n| 名称 | 数值 |\n|---|---|\n| A | 1 |');await page.locator('#post-markdown').check();await page.locator('#post-form button[type=submit]').click();
+ await page.locator('#post-title').fill('账户笔记');await page.locator('#post-body').fill('## 浏览器实际发布\n\n**粗体正文**\n\n| 名称 | 数值 |\n|---|---|\n| A | 1 |\n\n~~~text\n  <tag>&"\n\nnext\n~~~');await page.locator('#post-markdown').check();await page.locator('#post-form button[type=submit]').click();
  await page.locator('#detail-title').filter({hasText:'账户笔记'}).waitFor();assert.match(await page.locator('#detail-meta').textContent(),/browseruser · UID 2 · 注册用户/);
  await page.locator('#detail-body .markdown-rendered h2').filter({hasText:'浏览器实际发布'}).waitFor();
  const markdownPostID=await page.evaluate(()=>location.hash.slice(6));
@@ -79,6 +79,18 @@ try{
  await page.goto(base+'/#post/'+markdownPostID);await page.locator('#detail-body .markdown-rendered table').waitFor();await page.locator('#detail-body .markdown-source-tools>summary').click();
  assert.equal(await page.locator('#detail-body .markdown-source-lines .line-copy').count(),savedMarkdownPost.body.split('\n').length);
  for(const width of [320,390,768,1440]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Markdown layout overflow at '+width)}
+ // Whole-post, reply and parsed code copies use source payloads on a real server.
+ await page.evaluate(()=>{
+  window.copyWrites=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>window.copyWrites.push(value)}});
+  window.workspaceShareText=async()=>false;
+ });
+ const expectedCode='  <tag>&"\n\nnext\n';
+ await page.locator('#post-tools>.admin-tools>.copy-button').click();await page.locator('#post-tools>.admin-tools>.copy-button[data-copy-state=success]').waitFor();
+ assert.equal(await page.evaluate(()=>window.copyWrites.at(-1)),savedMarkdownPost.body);
+ await page.locator('#detail-body .markdown-code-toolbar .copy-button').click();await page.locator('#detail-body .markdown-code-toolbar .copy-button[data-copy-state=success]').waitFor();
+ assert.equal(await page.evaluate(()=>window.copyWrites.at(-1)),expectedCode);
+ await page.locator('.reply>.admin-tools>.copy-button').click();await page.locator('.reply>.admin-tools>.copy-button[data-copy-state=success]').waitFor();
+ assert.equal(await page.evaluate(()=>window.copyWrites.at(-1)),savedMarkdownPost.replies[0].body);
  if(process.env.MARKDOWN_SCREENSHOT_PREFIX){await page.setViewportSize({width:390,height:900});await page.locator('#detail-title').scrollIntoViewIfNeeded();await page.screenshot({path:process.env.MARKDOWN_SCREENSHOT_PREFIX+'-real.png'})}
  assert.deepEqual(errors,[]);await context.close();console.log('Auth browser smoke passed: registration, login, member post/reply, XHR upload, logout, first-user admin, sequential UIDs, user disable, settings, short and long passwords, dropdown topic creation.');
 }finally{

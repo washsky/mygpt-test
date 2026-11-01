@@ -54,11 +54,11 @@ main>div{min-width:0}
 .visitor-info>div{min-width:0;overflow-wrap:anywhere}
 #detail-meta .visitor-info{align-items:start}
 #detail-meta .visitor-info strong{font-size:13px;font-weight:600}
-.detail-topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
-.detail-topbar .back{min-height:36px!important;padding:0}
+.detail-topbar{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap;margin-bottom:10px}
+.detail-topbar .back{min-height:36px!important;padding:0;white-space:nowrap}
 #reading-time{margin:8px 0 0;font-size:12px}
-#post-tools{min-width:0}#post-tools .admin-tools{margin:0}
-#post-tools .admin-button,#post-tools .action-menu>summary{font-size:12px}
+#post-tools{min-width:0;margin-left:auto}#post-tools .admin-tools{margin:0;gap:6px;align-items:center}
+#post-tools .admin-button,#post-tools .action-menu>summary{font-size:12px}#post-tools .copy-button{padding:5px 9px;min-height:32px}
 #article-content{margin:18px 0 24px;padding:20px 0;border-block:1px solid var(--line);min-width:0}
 #detail[data-body-bubble=true] #article-content{padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:var(--soft)}
 #detail-body{font-size:18px;line-height:1.9;padding:0;tab-size:4}
@@ -96,6 +96,20 @@ input:not([type=checkbox]),select,textarea{min-width:0}button.primary{min-height
 .markdown-source-tools{margin-top:18px;padding-top:10px;border-top:1px solid var(--line);white-space:normal;font-size:13px}
 .markdown-source-tools>summary{cursor:pointer;color:var(--muted);min-height:36px;line-height:36px}
 .markdown-source-lines{font-size:13px;line-height:1.8}.markdown-source-lines .line-number{opacity:1}
+
+button.copy-button{display:inline-grid;grid-template-columns:auto;place-items:center;position:relative;white-space:nowrap;vertical-align:middle}
+.copy-label,.copy-feedback{grid-area:1/1;pointer-events:none}.copy-feedback{min-width:3em;text-align:center;visibility:hidden}
+.copy-button[data-copy-state] .copy-label{visibility:hidden}.copy-button[data-copy-state] .copy-feedback{visibility:visible}
+.copy-button[data-copy-state=success]{color:var(--accent)!important;border-color:var(--accent)}
+.copy-button[data-copy-state=error]{color:#b64b45!important;border-color:#b64b45}
+.copy-button[aria-busy=true]{cursor:progress;opacity:.7}.action-menu-panel .copy-button{justify-items:start}
+.copy-status{position:fixed;z-index:180;bottom:max(20px,env(safe-area-inset-bottom));left:16px;right:16px;max-width:480px;margin:auto;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font-size:13px;line-height:1.6;white-space:normal;overflow-wrap:anywhere;pointer-events:none}
+.copy-status[data-failed=true]{border-color:#b64b45}
+.markdown-code-block{min-width:0;max-width:100%;margin:12px 0;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--soft)}
+.markdown-code-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:38px;padding:5px 10px;border-bottom:1px solid var(--line)}
+.code-language{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px/1.6 ui-monospace,monospace;color:var(--muted)}
+.markdown-code-toolbar .copy-button{flex:0 0 auto;min-height:28px;padding:3px 8px;font-size:12px}
+.markdown-rendered .markdown-code-block pre{margin:0;border:0;border-radius:0}
 @media(max-width:760px){
  main{width:calc(100% - 24px);margin-top:12px}
  .forum-heading{display:block;margin-bottom:10px;padding-inline:4px}
@@ -117,5 +131,5 @@ input:not([type=checkbox]),select,textarea{min-width:0}button.primary{min-height
  #post-tools .admin-button{padding:5px 8px}
  #reply-form .reply-compose-tools{display:block}
 }
-@media print{.workspace-bar,.workspace-crumb,.workspace-footer,#feed,#editor,#settings,#trash,#post-tools,#reply-form,.admin-tools,.back,dialog{display:none!important}main{display:block!important;width:100%!important;margin:0!important}#detail{max-width:none;border:0!important;box-shadow:none!important;padding:0!important}#detail #article-content,#detail .reply-content{background:transparent!important;border:0!important;padding:0!important}body{background:white!important;color:black!important}.body{font-size:12pt!important}.inline-image{max-height:14cm}a{color:inherit}}
+@media print{.workspace-bar,.workspace-crumb,.workspace-footer,#feed,#editor,#settings,#trash,#post-tools,#reply-form,.admin-tools,.markdown-code-toolbar,.copy-button,.copy-status,.back,dialog{display:none!important}main{display:block!important;width:100%!important;margin:0!important}#detail{max-width:none;border:0!important;box-shadow:none!important;padding:0!important}#detail #article-content,#detail .reply-content{background:transparent!important;border:0!important;padding:0!important}body{background:white!important;color:black!important}.body{font-size:12pt!important}.inline-image{max-height:14cm}a{color:inherit}}
 </style>`
